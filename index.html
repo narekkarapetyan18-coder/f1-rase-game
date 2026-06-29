@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>F1 Race Game</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { overflow: hidden; background: #000; }
+    canvas { display: block; width: 100vw; height: 100vh; }
+
+    #hud {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      font-family: 'Courier New', monospace;
+      color: #fff;
+      text-shadow: 0 0 8px rgba(0,0,0,0.9);
+    }
+
+    #hud-speed {
+      position: absolute;
+      bottom: 40px; right: 40px;
+      font-size: 52px; font-weight: bold;
+      color: #e10600;
+      line-height: 1;
+    }
+    #hud-speed-label {
+      position: absolute;
+      bottom: 32px; right: 42px;
+      font-size: 14px; color: #aaa;
+    }
+    #hud-lap {
+      position: absolute;
+      top: 30px; left: 40px;
+      font-size: 22px; font-weight: bold;
+    }
+    #hud-laptime {
+      position: absolute;
+      top: 62px; left: 40px;
+      font-size: 30px; color: #ffdd00;
+    }
+    #hud-bestlap {
+      position: absolute;
+      top: 100px; left: 40px;
+      font-size: 16px; color: #aaa;
+    }
+    #hud-gear {
+      position: absolute;
+      bottom: 40px; left: 40px;
+      font-size: 18px; color: #ccc;
+    }
+
+    #race-end {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.75);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      pointer-events: auto;
+    }
+    #race-end.hidden { display: none; }
+    #race-end h1 { font-size: 64px; color: #e10600; font-family: 'Courier New', monospace; }
+    #race-end p  { font-size: 24px; color: #fff; margin-top: 16px; font-family: 'Courier New', monospace; }
+    #race-end button {
+      margin-top: 32px;
+      padding: 14px 40px;
+      font-size: 20px;
+      background: #e10600;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+      font-family: 'Courier New', monospace;
+      font-weight: bold;
+    }
+
+    /* Touch controls */
+    #touch-controls {
+      position: absolute;
+      bottom: 20px;
+      left: 0; right: 0;
+      display: flex;
+      justify-content: space-between;
+      padding: 0 20px;
+      pointer-events: auto;
+    }
+    .touch-group { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+    .touch-btn {
+      width: 64px; height: 64px;
+      background: rgba(255,255,255,0.15);
+      border: 2px solid rgba(255,255,255,0.3);
+      border-radius: 12px;
+      font-size: 24px;
+      display: flex; align-items: center; justify-content: center;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="hud">
+    <div id="hud-lap">Lap 1 / 3</div>
+    <div id="hud-laptime">0:00.000</div>
+    <div id="hud-bestlap">Best: --</div>
+    <div id="hud-speed">0</div>
+    <div id="hud-speed-label">km/h</div>
+    <div id="hud-gear">Controls: W/S = throttle/brake &nbsp; A/D = steer</div>
+
+    <div id="race-end" class="hidden">
+      <h1>RACE OVER</h1>
+      <p id="race-end-best"></p>
+      <button onclick="location.reload()">RESTART</button>
+    </div>
+
+    <div id="touch-controls">
+      <div class="touch-group">
+        <div class="touch-btn" id="btn-left">◀</div>
+        <div class="touch-btn" id="btn-right">▶</div>
+      </div>
+      <div class="touch-group">
+        <div class="touch-btn" id="btn-accel">▲</div>
+        <div class="touch-btn" id="btn-brake">▼</div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
