@@ -1,133 +1,2680 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>F1 Race Game</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { overflow: hidden; background: #000; }
-    canvas { display: block; width: 100vw; height: 100vh; }
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>MiniCraft</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: monospace; }
+  canvas { display: block; cursor: crosshair; touch-action: none; }
+  canvas.title-mode { cursor: default; }
+</style>
 
-    #hud {
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      font-family: 'Courier New', monospace;
-      color: #fff;
-      text-shadow: 0 0 8px rgba(0,0,0,0.9);
+
+<canvas id="c"></canvas>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+canvas.width  = window.innerWidth;
+canvas.height = window.innerHeight;
+const W = canvas.width, H = canvas.height;
+
+const TILE    = 32;
+const WORLD_W = 220;
+const WORLD_H = 80;
+
+// Block IDs
+const AIR=0, GRASS=1, DIRT=2, STONE=3, SAND=4,
+      WOOD=5, LEAVES=6, COAL=7, IRON=8, BEDROCK=9, PLANKS=10;
+
+const BLOCK_NAME = ['','Grass','Dirt','Stone','Sand','Wood','Leaves','Coal Ore','Iron Ore','Bedrock','Planks'];
+const BLOCK_HARD = [0, 0.8, 0.7, 3.0, 0.5, 2.0, 0.4, 4.0, 5.0, Infinity, 1.5];
+const BLOCK_DROP = [0, DIRT, DIRT, STONE, SAND, WOOD, LEAVES, COAL, IRON, 0, PLANKS];
+
+const C_TOP = {
+  [GRASS]:'#5d9e42',[DIRT]:'#9b6b3c',[STONE]:'#9a9a9a',[SAND]:'#ddd060',
+  [WOOD]:'#7a5530',[LEAVES]:'#3da83d',[COAL]:'#8c8c8c',[IRON]:'#9c9c8c',
+  [BEDROCK]:'#484848',[PLANKS]:'#cf9a5a',
+};
+const C_DARK = {
+  [GRASS]:'#9b6b3c',[DIRT]:'#7a5230',[STONE]:'#7a7a7a',[SAND]:'#c0aa40',
+  [WOOD]:'#5a3a18',[LEAVES]:'#2a782a',[COAL]:'#6c6c6c',[IRON]:'#7c7c6c',
+  [BEDROCK]:'#333',[PLANKS]:'#a87840',
+};
+
+// World
+const world   = Array.from({length: WORLD_H}, () => new Uint8Array(WORLD_W));
+const heights = new Array(WORLD_W);
+
+function sn(x, s, a) {
+  return Math.sin(x*s)*a*0.45 + Math.sin(x*s*2.3+1.7)*a*0.35 + Math.sin(x*s*0.43+3.1)*a*0.2;
+}
+
+function generateWorld() {
+  for (let x = 0; x < WORLD_W; x++)
+    heights[x] = Math.round(WORLD_H*0.38 + sn(x,0.04,10) + sn(x,0.015,6));
+
+  for (let y = 0; y < WORLD_H; y++) {
+    for (let x = 0; x < WORLD_W; x++) {
+      const h = heights[x];
+      if (y < h)              { world[y][x] = AIR; continue; }
+      if (y === h)            { world[y][x] = GRASS; continue; }
+      if (y < h+4)            { world[y][x] = DIRT; continue; }
+      if (y === WORLD_H-1)    { world[y][x] = BEDROCK; continue; }
+      const r = Math.random();
+      world[y][x] = r<0.025 ? COAL : (r<0.038 && y>h+8 ? IRON : STONE);
+    }
+  }
+
+  // Trees
+  for (let x = 4; x < WORLD_W-4; x++) {
+    if (world[heights[x]][x] === GRASS && Math.random() < 0.07) {
+      const h = heights[x], th = 4 + Math.floor(Math.random()*2);
+      for (let ty = h-th; ty < h; ty++) if (ty>=0) world[ty][x] = WOOD;
+      for (let ly = h-th-2; ly <= h-th+1; ly++) {
+        const r = ly <= h-th-1 ? 2 : 1;
+        for (let lx = x-r; lx <= x+r; lx++)
+          if (ly>=0 && lx>=0 && lx<WORLD_W && world[ly][lx]===AIR) world[ly][lx] = LEAVES;
+      }
+    }
+  }
+
+  // Caves
+  for (let i = 0; i < 55; i++) {
+    let cx = 1+Math.floor(Math.random()*(WORLD_W-2));
+    let cy = heights[cx]+5+Math.floor(Math.random()*15);
+    let dir = Math.random()*Math.PI*2;
+    const len = 20+Math.floor(Math.random()*60);
+    for (let s = 0; s < len; s++) {
+      dir += (Math.random()-0.5)*0.7;
+      cx = Math.max(1, Math.min(WORLD_W-2, Math.round(cx+Math.cos(dir))));
+      cy = Math.max(1, Math.min(WORLD_H-2, Math.round(cy+Math.sin(dir)*0.6)));
+      if (world[cy][cx]!==BEDROCK) world[cy][cx] = AIR;
+      if (Math.random()<0.6 && cx>1) world[cy][cx-1] = AIR;
+    }
+  }
+}
+
+// Player
+const P = { x:0, y:0, vx:0, vy:0, w:16, h:32, onGround:false, facing:1, frame:0 };
+
+function spawnPlayer() {
+  const mx = Math.floor(WORLD_W/2);
+  P.x = mx*TILE + (TILE-P.w)/2;
+  for (let y = 0; y < WORLD_H; y++) {
+    if (world[y][mx] !== AIR) { P.y = (y-2)*TILE; return; }
+  }
+  P.y = 10*TILE;
+}
+
+const GRAVITY=0.4, JUMP_V=-11, SPD=3.5;
+const cam = {x:0, y:0};
+
+// Hotbar
+const hotbar = [
+  {id:GRASS,n:64},{id:DIRT,n:64},{id:STONE,n:64},
+  {id:WOOD,n:64},{id:PLANKS,n:64},{id:SAND,n:64},
+  {id:0,n:0},{id:0,n:0},{id:0,n:0},
+];
+let selSlot = 0;
+
+function addBlock(id) {
+  for (const s of hotbar) if (s.id===id && s.n<99) { s.n++; return; }
+  for (const s of hotbar) if (!s.id)               { s.id=id; s.n=1; return; }
+}
+
+// Game state
+let gameState = 'title'; // 'title' | 'playing'
+const PLAY_BTN = { x: W/2-140, y: H*0.60, w: 280, h: 52 };
+
+// Mining / placing
+let mining = null, placeCd = 0;
+let drops  = [];
+
+// Input
+const keys = {};
+window.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (e.key>='1' && e.key<='9') selSlot = +e.key-1;
+
+  // E — next hotbar slot
+  if (e.key === 'e' || e.key === 'E') {
+    selSlot = (selSlot + 1) % 9;
+  }
+
+  // Q — previous hotbar slot
+  if (e.key === 'q' || e.key === 'Q') {
+    selSlot = (selSlot - 1 + 9) % 9;
+  }
+
+  e.preventDefault();
+});
+window.addEventListener('keyup', e => { keys[e.key] = false; });
+
+let mx=0, my=0, lmb=false, rmb=false;
+canvas.addEventListener('mousemove', e => {
+  const r = canvas.getBoundingClientRect();
+  mx = e.clientX-r.left; my = e.clientY-r.top;
+  if (gameState === 'title') {
+    const b = PLAY_BTN;
+    canvas.style.cursor = (mx>=b.x&&mx<=b.x+b.w&&my>=b.y&&my<=b.y+b.h) ? 'pointer' : 'default';
+  } else {
+    canvas.style.cursor = 'crosshair';
+  }
+});
+canvas.addEventListener('mousedown', e => {
+  if (e.button===0) lmb=true;
+  if (e.button===2) rmb=true;
+  e.preventDefault();
+});
+canvas.addEventListener('mouseup', e => {
+  if (e.button===0) { lmb=false; mining=null; }
+  if (e.button===2) rmb=false;
+});
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+canvas.addEventListener('click', e => {
+  if (gameState !== 'title') return;
+  const r = canvas.getBoundingClientRect();
+  const cx = e.clientX-r.left, cy = e.clientY-r.top;
+  const b = PLAY_BTN;
+  if (cx>=b.x && cx<=b.x+b.w && cy>=b.y && cy<=b.y+b.h) {
+    gameState = 'playing';
+  }
+});
+canvas.addEventListener('wheel', e => {
+  selSlot = (selSlot + (e.deltaY>0?1:-1)+9)%9;
+  e.preventDefault();
+}, {passive:false});
+
+// Physics
+function solidAt(wx, wy) {
+  const tx=Math.floor(wx/TILE), ty=Math.floor(wy/TILE);
+  if (tx<0||tx>=WORLD_W||ty<0||ty>=WORLD_H) return true;
+  return world[ty][tx] !== AIR;
+}
+
+function updatePhysics() {
+  if (keys['ArrowLeft']||keys['a'])       { P.vx=-SPD; P.facing=-1; }
+  else if (keys['ArrowRight']||keys['d']) { P.vx=SPD;  P.facing=1;  }
+  else P.vx *= 0.75;
+
+  if ((keys[' ']||keys['ArrowUp']||keys['w']) && P.onGround) {
+    P.vy=JUMP_V; P.onGround=false;
+    keys[' ']=keys['ArrowUp']=keys['w']=false;
+    playJump();
+  }
+
+  P.vy = Math.min(P.vy+GRAVITY, 18);
+
+  P.x += P.vx;
+  if (P.vx<0 && (solidAt(P.x, P.y+2)||solidAt(P.x, P.y+P.h-2)))
+    { P.x=Math.ceil(P.x/TILE)*TILE; P.vx=0; }
+  if (P.vx>0 && (solidAt(P.x+P.w, P.y+2)||solidAt(P.x+P.w, P.y+P.h-2)))
+    { P.x=Math.floor((P.x+P.w)/TILE)*TILE-P.w; P.vx=0; }
+
+  P.y += P.vy; P.onGround=false;
+  if (P.vy>0 && (solidAt(P.x+2, P.y+P.h)||solidAt(P.x+P.w-2, P.y+P.h)))
+    { P.y=Math.floor((P.y+P.h)/TILE)*TILE-P.h; P.vy=0; P.onGround=true; }
+  if (P.vy<0 && (solidAt(P.x+2, P.y)||solidAt(P.x+P.w-2, P.y)))
+    { P.y=Math.ceil(P.y/TILE)*TILE; P.vy=0; }
+
+  P.x = Math.max(0, Math.min(P.x, WORLD_W*TILE-P.w));
+  if (P.y > WORLD_H*TILE) { P.y=10*TILE; P.vy=0; }
+
+  if (Math.abs(P.vx)>0.5 && P.onGround) P.frame+=0.15;
+}
+
+function targetBlock() {
+  return { bx:Math.floor((mx+cam.x)/TILE), by:Math.floor((my+cam.y)/TILE) };
+}
+
+function inReach(bx, by) {
+  return Math.hypot(bx*TILE+TILE/2-(P.x+P.w/2), by*TILE+TILE/2-(P.y+P.h/2)) < TILE*5;
+}
+
+function updateMining(dt) {
+  if (!lmb) { mining=null; return; }
+  const {bx,by} = targetBlock();
+  if (!inReach(bx,by)||bx<0||bx>=WORLD_W||by<0||by>=WORLD_H) { mining=null; return; }
+  const b = world[by][bx];
+  if (b===AIR||BLOCK_HARD[b]===Infinity) { mining=null; return; }
+
+  if (!mining||mining.bx!==bx||mining.by!==by)
+    mining = {bx, by, prog:0, total:BLOCK_HARD[b]*55};
+
+  mining.prog += dt;
+  if (mining.prog >= mining.total) {
+    if (b === WOOD) {
+      // Lumberjack: fell the whole tree instantly
+      fellTree(bx, by);
+    } else {
+      const drop = BLOCK_DROP[b];
+      if (drop) drops.push({x:bx*TILE+10, y:by*TILE+10, vx:(Math.random()-.5)*2, vy:-3, id:drop});
+      world[by][bx] = AIR;
+    }
+    mining = null;
+    playBreak();
+  }
+}
+
+// Flood-fill to find and chop all connected WOOD + LEAVES in a tree
+function fellTree(startX, startY) {
+  const visited = new Set();
+  const stack = [[startX, startY]];
+  while (stack.length) {
+    const [x, y] = stack.pop();
+    const key = x*1000+y;
+    if (visited.has(key)) continue;
+    if (x<0||x>=WORLD_W||y<0||y>=WORLD_H) continue;
+    const id = world[y][x];
+    if (id !== WOOD && id !== LEAVES) continue;
+    visited.add(key);
+    // Drop wood logs (leaves vanish silently)
+    if (id === WOOD) {
+      drops.push({x:x*TILE+8, y:y*TILE+8, vx:(Math.random()-.5)*2, vy:-3-Math.random()*2, id:WOOD});
+    }
+    world[y][x] = AIR;
+    // Search up, left, right (not down — trees grow up)
+    stack.push([x,y-1],[x-1,y],[x+1,y],[x,y+1]);
+  }
+}
+
+function updatePlacing() {
+  if (!rmb||placeCd>0) return;
+  const {bx,by} = targetBlock();
+  if (!inReach(bx,by)||bx<0||bx>=WORLD_W||by<0||by>=WORLD_H) return;
+  if (world[by][bx]!==AIR) return;
+  const pl=Math.floor(P.x/TILE), pr=Math.floor((P.x+P.w-1)/TILE);
+  const pt=Math.floor(P.y/TILE), pb=Math.floor((P.y+P.h-1)/TILE);
+  if (bx>=pl&&bx<=pr&&by>=pt&&by<=pb) return;
+  const s = hotbar[selSlot];
+  if (!s.id) return;
+  world[by][bx] = s.id;
+  placeCd = 10;
+}
+
+function updateDrops() {
+  for (const d of drops) {
+    d.vy += 0.3; d.x+=d.vx; d.y+=d.vy; d.vx*=0.95;
+    const tx=Math.floor((d.x+6)/TILE), ty=Math.floor((d.y+12)/TILE);
+    if (ty>=0&&ty<WORLD_H&&tx>=0&&tx<WORLD_W&&world[ty][tx]!==AIR)
+      { d.y=ty*TILE-12; d.vy*=-0.3; if(Math.abs(d.vy)<0.5)d.vy=0; }
+    if (Math.hypot(d.x+9-(P.x+P.w/2), d.y+9-(P.y+P.h/2))<40)
+      { addBlock(d.id); d.dead=true; }
+  }
+  drops = drops.filter(d=>!d.dead);
+}
+
+function updateCam() {
+  const tx=P.x+P.w/2-W/2, ty=P.y+P.h/2-H*0.5;
+  cam.x += (tx-cam.x)*0.1; cam.y += (ty-cam.y)*0.1;
+  cam.x = Math.max(0, Math.min(cam.x, WORLD_W*TILE-W));
+  cam.y = Math.max(0, Math.min(cam.y, WORLD_H*TILE-H));
+}
+
+// Drawing
+function drawBlock(bx, by, type) {
+  const sx=bx*TILE-cam.x, sy=by*TILE-cam.y;
+  if (sx>W+2||sy>H+2||sx+TILE<-2||sy+TILE<-2) return;
+
+  ctx.fillStyle = C_TOP[type]||'#888';
+  ctx.fillRect(sx, sy, TILE, TILE);
+  ctx.fillStyle = C_DARK[type]||'#555';
+  ctx.fillRect(sx, sy+TILE-5, TILE, 5);
+  ctx.fillRect(sx+TILE-5, sy, 5, TILE-5);
+  ctx.fillStyle = 'rgba(255,255,255,0.13)';
+  ctx.fillRect(sx, sy, TILE, 4);
+  ctx.fillRect(sx, sy, 4, TILE);
+
+  if (type===GRASS) { ctx.fillStyle='#5d9e42'; ctx.fillRect(sx,sy,TILE,7); }
+  if (type===COAL) {
+    ctx.fillStyle='#222';
+    ctx.fillRect(sx+7,sy+7,5,5); ctx.fillRect(sx+18,sy+17,6,5); ctx.fillRect(sx+10,sy+20,4,4);
+  }
+  if (type===IRON) {
+    ctx.fillStyle='#d4873c';
+    ctx.fillRect(sx+7,sy+7,5,5); ctx.fillRect(sx+18,sy+17,6,5);
+  }
+  if (type===WOOD) {
+    ctx.fillStyle='rgba(0,0,0,0.18)';
+    ctx.fillRect(sx+10,sy,4,TILE); ctx.fillRect(sx+18,sy,3,TILE);
+  }
+  if (type===PLANKS) {
+    ctx.fillStyle='rgba(0,0,0,0.15)';
+    ctx.fillRect(sx,sy+10,TILE,2); ctx.fillRect(sx,sy+22,TILE,2);
+    ctx.fillRect(sx+16,sy,2,10);  ctx.fillRect(sx+8,sy+12,2,10);
+  }
+
+  ctx.strokeStyle='rgba(0,0,0,0.2)'; ctx.lineWidth=0.5;
+  ctx.strokeRect(sx+.5, sy+.5, TILE-1, TILE-1);
+}
+
+function drawWorld() {
+  const x0=Math.max(0,Math.floor(cam.x/TILE));
+  const x1=Math.min(WORLD_W, Math.ceil((cam.x+W)/TILE)+1);
+  const y0=Math.max(0,Math.floor(cam.y/TILE));
+  const y1=Math.min(WORLD_H, Math.ceil((cam.y+H)/TILE)+1);
+  for (let y=y0; y<y1; y++)
+    for (let x=x0; x<x1; x++)
+      if (world[y][x]) drawBlock(x,y,world[y][x]);
+}
+
+function drawHighlight() {
+  const {bx,by}=targetBlock();
+  if (!inReach(bx,by)||bx<0||bx>=WORLD_W||by<0||by>=WORLD_H) return;
+  if (world[by][bx]===AIR&&!rmb) return;
+  ctx.strokeStyle='rgba(0,0,0,0.7)'; ctx.lineWidth=2;
+  ctx.strokeRect(bx*TILE-cam.x+1, by*TILE-cam.y+1, TILE-2, TILE-2);
+}
+
+function drawMiningOverlay() {
+  if (!mining) return;
+  const sx=mining.bx*TILE-cam.x, sy=mining.by*TILE-cam.y;
+  const p=mining.prog/mining.total;
+  ctx.fillStyle=`rgba(0,0,0,${p*0.5})`; ctx.fillRect(sx,sy,TILE,TILE);
+  ctx.strokeStyle=`rgba(20,8,0,${0.4+p*0.5})`; ctx.lineWidth=1.5;
+  const n=Math.floor(p*7);
+  for (let i=0;i<n;i++) {
+    ctx.beginPath();
+    ctx.moveTo(sx+5+i*4, sy+5+i*4);
+    ctx.lineTo(sx+12+i*3, sy+14+i*3);
+    ctx.stroke();
+  }
+}
+
+function drawDrops() {
+  for (const d of drops) {
+    const sx=Math.round(d.x-cam.x), sy=Math.round(d.y-cam.y);
+    const sz = 18;
+    // glow
+    ctx.shadowColor = C_TOP[d.id]||'#fff'; ctx.shadowBlur = 8;
+    ctx.fillStyle = C_TOP[d.id]||'#888'; ctx.fillRect(sx, sy, sz, sz);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = C_DARK[d.id]||'#555';
+    ctx.fillRect(sx, sy+sz-5, sz, 5);
+    ctx.fillRect(sx+sz-5, sy, 5, sz);
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.fillRect(sx, sy, sz, 4); ctx.fillRect(sx, sy, 4, sz);
+    ctx.strokeStyle='#222'; ctx.lineWidth=1.5; ctx.strokeRect(sx,sy,sz,sz);
+  }
+}
+
+function drawPlayer() {
+  const sx=Math.round(P.x-cam.x+P.w/2);
+  const sy=Math.round(P.y-cam.y+P.h);
+  ctx.save();
+  ctx.translate(sx, sy);
+  ctx.scale(P.facing, 1);
+  ctx.lineCap='round';
+  const leg=Math.sin(P.frame)*11;
+  const arm=Math.sin(P.frame)*13;
+
+  // === dark purple villager skin ===
+
+  // legs — dark black with purple trim
+  ctx.strokeStyle='#1a0a2a'; ctx.lineWidth=5;
+  ctx.beginPath(); ctx.moveTo(-4,-4); ctx.lineTo(-4+leg*0.4,-0+leg); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(4,-4);  ctx.lineTo(4-leg*0.4,0-leg); ctx.stroke();
+  // purple boot highlight
+  ctx.strokeStyle='#6a20c0'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(-4,-4); ctx.lineTo(-4+leg*0.4,-0+leg); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(4,-4);  ctx.lineTo(4-leg*0.4,0-leg); ctx.stroke();
+
+  // body — dark with purple center glow stripe
+  ctx.fillStyle='#0d0818'; ctx.fillRect(-8,-24,16,20);
+  ctx.fillStyle='#6a20c0'; ctx.fillRect(-2,-23,4,18); // purple vertical stripe
+  ctx.fillStyle='rgba(120,40,220,0.3)'; ctx.fillRect(-8,-24,16,20); // subtle purple tint
+  ctx.strokeStyle='#2a0a4a'; ctx.lineWidth=1; ctx.strokeRect(-8,-24,16,20);
+
+  // shoulder pads — wider dark blocks
+  ctx.fillStyle='#1a0830'; ctx.fillRect(-11,-24,5,7);
+  ctx.fillRect(6,-24,5,7);
+  ctx.strokeStyle='#6a20c0'; ctx.lineWidth=1;
+  ctx.strokeRect(-11,-24,5,7); ctx.strokeRect(6,-24,5,7);
+
+  // arms — dark with purple edge
+  ctx.strokeStyle='#0d0818'; ctx.lineWidth=4;
+  ctx.beginPath(); ctx.moveTo(-9,-22); ctx.lineTo(-14,-14+arm); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(9,-22);  ctx.lineTo(14,-14-arm); ctx.stroke();
+  ctx.strokeStyle='#6a20c0'; ctx.lineWidth=1.2;
+  ctx.beginPath(); ctx.moveTo(-9,-22); ctx.lineTo(-14,-14+arm); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(9,-22);  ctx.lineTo(14,-14-arm); ctx.stroke();
+
+  // axe in right hand
+  ctx.save();
+  ctx.translate(14, -14-arm);
+  ctx.rotate(-0.4);
+  ctx.fillStyle='#7a5530'; ctx.fillRect(0,-1,12,2);   // handle
+  ctx.fillStyle='#9a9ab0'; ctx.fillRect(9,-6,5,10);   // blade body
+  ctx.fillStyle='#c0c0d8'; ctx.fillRect(11,-7,3,3);   // blade edge
+  ctx.restore();
+
+  // head — dark black with purple glow
+  ctx.fillStyle='#0d0818'; ctx.fillRect(-7,-38,14,14);
+  ctx.strokeStyle='#2a0a4a'; ctx.lineWidth=1.5; ctx.strokeRect(-7,-38,14,14);
+
+  // hood / shadow on top of head
+  ctx.fillStyle='#070510'; ctx.fillRect(-8,-39,16,6);
+  ctx.strokeStyle='#3a0a6a'; ctx.lineWidth=1; ctx.strokeRect(-8,-39,16,6);
+
+  // purple glowing eyes
+  ctx.shadowColor='#a040ff'; ctx.shadowBlur=8;
+  ctx.fillStyle='#bf5fff';
+  ctx.fillRect(-5,-33,4,3);
+  ctx.fillRect(2,-33,4,3);
+  ctx.shadowBlur=0;
+
+  // subtle purple face glow
+  ctx.fillStyle='rgba(140,40,255,0.12)'; ctx.fillRect(-7,-38,14,14);
+
+  ctx.restore();
+}
+
+function drawHotbar() {
+  const sz=44, pad=3;
+  const sx0=(W-9*(sz+pad))/2, sy0=H-sz-8;
+  for (let i=0;i<9;i++) {
+    const sx=sx0+i*(sz+pad), sy=sy0, sel=i===selSlot;
+    ctx.fillStyle = sel?'rgba(255,255,220,0.22)':'rgba(0,0,0,0.55)';
+    ctx.fillRect(sx,sy,sz,sz);
+    ctx.strokeStyle=sel?'#fff':'#888'; ctx.lineWidth=sel?2.5:1;
+    ctx.strokeRect(sx,sy,sz,sz);
+    const s=hotbar[i];
+    if (s.id) {
+      ctx.fillStyle=C_TOP[s.id]||'#888'; ctx.fillRect(sx+6,sy+6,32,32);
+      ctx.fillStyle=C_DARK[s.id]||'#555';
+      ctx.fillRect(sx+6,sy+30,32,8); ctx.fillRect(sx+30,sy+6,8,32);
+      ctx.strokeStyle='#222'; ctx.lineWidth=1; ctx.strokeRect(sx+6,sy+6,32,32);
+      ctx.fillStyle='#fff'; ctx.font='bold 10px monospace';
+      ctx.fillText(s.n, sx+sz-15, sy+sz-4);
+    }
+    ctx.fillStyle='#aaa'; ctx.font='9px monospace';
+    ctx.fillText(i+1, sx+3, sy+11);
+  }
+  const s=hotbar[selSlot];
+  if (s.id) {
+    const name=BLOCK_NAME[s.id]||'';
+    ctx.font='13px monospace';
+    const tw=ctx.measureText(name).width;
+    ctx.fillStyle='rgba(0,0,0,0.5)';
+    ctx.fillRect(W/2-tw/2-4, sy0-24, tw+8, 18);
+    ctx.fillStyle='#eee'; ctx.fillText(name, W/2-tw/2, sy0-10);
+  }
+}
+
+function drawHUD() {
+  ctx.fillStyle='rgba(0,0,0,0.4)'; ctx.fillRect(6,6,160,20);
+  ctx.fillStyle='#ccc'; ctx.font='11px monospace';
+  ctx.fillText(`X:${Math.floor(P.x/TILE)}  Y:${Math.floor(P.y/TILE)}`, 12, 20);
+
+  // Lumberjack badge
+  ctx.fillStyle='rgba(60,0,100,0.75)'; ctx.fillRect(6,30,170,18);
+  ctx.shadowColor='#a040ff'; ctx.shadowBlur=6;
+  ctx.fillStyle='#bf80ff'; ctx.font='bold 11px monospace';
+  ctx.fillText('🪓 Lumberjack: mine a tree to fell it', 10, 43);
+  ctx.shadowBlur=0;
+}
+
+function drawTitleBlock(sx, sy, BS, type, col, row) {
+  const s = col * 17 + row * 31; // deterministic seed
+
+  if (type === 'grass') {
+    // brown dirt base
+    ctx.fillStyle = '#8B5E3C'; ctx.fillRect(sx, sy, BS, BS);
+    // darker dirt spots
+    ctx.fillStyle = '#6B4020';
+    if (s%3===0) ctx.fillRect(sx+4,  sy+BS*0.35, BS*0.22, BS*0.18);
+    if (s%5===0) ctx.fillRect(sx+BS*0.55, sy+BS*0.55, BS*0.28, BS*0.16);
+    if (s%7===0) ctx.fillRect(sx+BS*0.2, sy+BS*0.65, BS*0.18, BS*0.14);
+    // green top strip
+    const gH = Math.round(BS * 0.30);
+    ctx.fillStyle = '#6ab04c'; ctx.fillRect(sx, sy, BS, gH);
+    // lighter green patches
+    ctx.fillStyle = '#8dc56a';
+    if (s%3===0) ctx.fillRect(sx+BS*0.12, sy+2, BS*0.18, gH-4);
+    if (s%4===0) ctx.fillRect(sx+BS*0.55, sy+3, BS*0.22, gH-5);
+    if (s%6===0) ctx.fillRect(sx+BS*0.35, sy+1, BS*0.14, gH-3);
+    // dark green edge
+    ctx.fillStyle = '#4a8a30';
+    if (s%5===0) ctx.fillRect(sx+BS*0.72, sy+2, BS*0.12, gH-4);
+    if (s%8===0) ctx.fillRect(sx+2, sy+1, BS*0.10, gH-3);
+
+  } else if (type === 'stone') {
+    ctx.fillStyle = '#8a8a8a'; ctx.fillRect(sx, sy, BS, BS);
+    ctx.fillStyle = '#666';
+    if (s%2===0) ctx.fillRect(sx+5, sy+8, BS*0.3, BS*0.22);
+    if (s%3===0) ctx.fillRect(sx+BS*0.55, sy+BS*0.5, BS*0.3, BS*0.22);
+    ctx.fillStyle = '#aaa';
+    if (s%4===0) ctx.fillRect(sx+2, sy+3, BS*0.15, BS*0.12);
+
+  } else { // dirt
+    ctx.fillStyle = '#8B5E3C'; ctx.fillRect(sx, sy, BS, BS);
+    ctx.fillStyle = '#6B4020';
+    if (s%3===0) ctx.fillRect(sx+5,      sy+7,      BS*0.24, BS*0.18);
+    if (s%4===0) ctx.fillRect(sx+BS*0.55, sy+BS*0.55, BS*0.28, BS*0.20);
+    if (s%5===0) ctx.fillRect(sx+BS*0.2, sy+BS*0.65, BS*0.20, BS*0.15);
+    if (s%7===0) ctx.fillRect(sx+BS*0.65, sy+12,     BS*0.18, BS*0.14);
+    ctx.fillStyle = '#7a5030';
+    if (s%6===0) ctx.fillRect(sx+BS*0.4, sy+BS*0.3, BS*0.15, BS*0.12);
+  }
+
+  // block border
+  ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 1.5;
+  ctx.strokeRect(sx+0.5, sy+0.5, BS-1, BS-1);
+}
+
+function drawTitleScreen() {
+  const BS = 72;
+  const cols = Math.ceil(W/BS)+1, rows = Math.ceil(H/BS)+1;
+  const grassRows = 2;
+
+  // stone positions (scattered in dirt)
+  const stoneSet = new Set([3*100+2, 2*100+5, 4*100+1, 5*100+4, 3*100+7, 6*100+3, 4*100+9, 7*100+2]);
+
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const sx = col*BS, sy = row*BS;
+      let type = row < grassRows ? 'grass' :
+                 stoneSet.has(row*100+col) ? 'stone' : 'dirt';
+      drawTitleBlock(sx, sy, BS, type, col, row);
+    }
+  }
+
+  // subtle dark gradient so logo pops
+  const ov = ctx.createLinearGradient(0,0,0,H);
+  ov.addColorStop(0,'rgba(0,0,0,0.08)');
+  ov.addColorStop(0.45,'rgba(0,0,0,0.38)');
+  ov.addColorStop(1,'rgba(0,0,0,0.65)');
+  ctx.fillStyle = ov; ctx.fillRect(0,0,W,H);
+
+  // ── MINICRAFT logo ───────────────────────────────────────
+  const lx = W/2, ly = Math.round(H*0.47);
+  ctx.textAlign = 'center';
+
+  // black 3-D shadow stack (offset bottom-right)
+  ctx.font = 'bold 86px monospace';
+  for (let i = 8; i >= 1; i--) {
+    const a = 0.55 + i*0.025;
+    ctx.fillStyle = `rgba(10,5,0,${a})`;
+    ctx.fillText('MINICRAFT', lx+i*1.1, ly+i*1.1);
+  }
+
+  // heavy black stroke
+  ctx.strokeStyle = '#000'; ctx.lineWidth = 11;
+  ctx.lineJoin = 'round';
+  ctx.strokeText('MINICRAFT', lx, ly);
+
+  // white fill
+  ctx.fillStyle = '#f0f0f0';
+  ctx.fillText('MINICRAFT', lx, ly);
+
+  // top highlight shine
+  ctx.fillStyle = 'rgba(255,255,255,0.28)';
+  ctx.font = 'bold 86px monospace';
+  ctx.fillText('MINICRAFT', lx-1.5, ly-3);
+
+  // ── Play button ──────────────────────────────────────────
+  const b = PLAY_BTN;
+  const hov = mx>=b.x && mx<=b.x+b.w && my>=b.y && my<=b.y+b.h;
+
+  ctx.fillStyle = hov ? '#7a7a7a' : '#555';
+  ctx.fillRect(b.x, b.y, b.w, b.h);
+  ctx.fillStyle = 'rgba(255,255,255,0.2)';
+  ctx.fillRect(b.x, b.y, b.w, 5); ctx.fillRect(b.x, b.y, 4, b.h);
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.fillRect(b.x, b.y+b.h-5, b.w, 5); ctx.fillRect(b.x+b.w-4, b.y, 4, b.h);
+  ctx.strokeStyle = hov ? '#fff' : '#aaa'; ctx.lineWidth = 2;
+  ctx.strokeRect(b.x+1, b.y+1, b.w-2, b.h-2);
+  ctx.font = 'bold 21px monospace';
+  ctx.fillStyle = hov ? '#fff' : '#e8e8e8';
+  ctx.fillText('▶  Singleplayer', b.x+b.w/2, b.y+34);
+
+  // hint
+  ctx.font = '11px monospace';
+  ctx.fillStyle = 'rgba(180,180,180,0.65)';
+  ctx.fillText('WASD · Space: jump · Left click: mine · Right click: place · 1-9: hotbar', lx, H-14);
+}
+
+function drawSky() {
+  const depth=Math.max(0,Math.min(1,cam.y/(WORLD_H*TILE*0.5)));
+  const r1=Math.round(135-depth*70), g1=Math.round(206-depth*80), b1=Math.round(235-depth*60);
+  const r2=Math.round(200-depth*50), g2=Math.round(232-depth*50), b2=Math.round(250-depth*30);
+  const grad=ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,`rgb(${r1},${g1},${b1})`);
+  grad.addColorStop(1,`rgb(${r2},${g2},${b2})`);
+  ctx.fillStyle=grad; ctx.fillRect(0,0,W,H);
+}
+
+// Audio
+const audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+
+function playJump() {
+  try {
+    const now=audioCtx.currentTime;
+    const osc=audioCtx.createOscillator(), g=audioCtx.createGain();
+    osc.connect(g); g.connect(audioCtx.destination);
+    osc.type='sine';
+    osc.frequency.setValueAtTime(280,now);
+    osc.frequency.exponentialRampToValueAtTime(560,now+0.1);
+    g.gain.setValueAtTime(0.14,now);
+    g.gain.exponentialRampToValueAtTime(0.001,now+0.15);
+    osc.start(now); osc.stop(now+0.15);
+  } catch(e){}
+}
+
+function playBreak() {
+  try {
+    const now=audioCtx.currentTime;
+    const buf=audioCtx.createBuffer(1,Math.floor(audioCtx.sampleRate*0.07),audioCtx.sampleRate);
+    const d=buf.getChannelData(0);
+    for (let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
+    const src=audioCtx.createBufferSource(); src.buffer=buf;
+    const lp=audioCtx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=500;
+    const g=audioCtx.createGain();
+    g.gain.setValueAtTime(0.25,now); g.gain.exponentialRampToValueAtTime(0.001,now+0.07);
+    src.connect(lp); lp.connect(g); g.connect(audioCtx.destination);
+    src.start(now); src.stop(now+0.07);
+  } catch(e){}
+}
+
+// Main loop
+let lastT = 0;
+function loop(t) {
+  const dt = Math.min((t-lastT)/16.67, 3);
+  lastT = t;
+
+  if (gameState === 'title') {
+    drawTitleScreen();
+  } else {
+    if (placeCd>0) placeCd--;
+    updatePhysics();
+    updateMining(dt);
+    updatePlacing();
+    updateDrops();
+    updateCam();
+    drawSky();
+    drawWorld();
+    drawHighlight();
+    drawMiningOverlay();
+    drawDrops();
+    drawPlayer();
+    drawHotbar();
+    drawHUD();
+  }
+
+  requestAnimationFrame(loop);
+}
+
+generateWorld();
+spawnPlayer();
+requestAnimationFrame(loop);
+
+drawPlayer = function() {
+  const sx=Math.round(P.x-cam.x+P.w/2);
+  const sy=Math.round(P.y-cam.y+P.h);
+  ctx.save();
+  ctx.translate(sx, sy);
+  ctx.scale(P.facing, 1);
+  ctx.lineCap='round';
+  const arm=Math.sin(P.frame)*13;
+
+  // legs — pendulum swing so feet stay near ground level
+  const swing  = Math.sin(P.frame) * 0.45; // max ~26 degrees
+  const legLen = 9;
+  const lLegX = -4 + Math.sin( swing) * legLen;
+  const lLegY = -4 + Math.cos( swing) * legLen;
+  const rLegX =  4 + Math.sin(-swing) * legLen;
+  const rLegY = -4 + Math.cos(-swing) * legLen;
+
+  ctx.strokeStyle='#1a0a2a'; ctx.lineWidth=5;
+  ctx.beginPath(); ctx.moveTo(-4,-4); ctx.lineTo(lLegX, lLegY); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo( 4,-4); ctx.lineTo(rLegX, rLegY); ctx.stroke();
+  ctx.strokeStyle='#6a20c0'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(-4,-4); ctx.lineTo(lLegX, lLegY); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo( 4,-4); ctx.lineTo(rLegX, rLegY); ctx.stroke();
+
+  // body
+  ctx.fillStyle='#0d0818'; ctx.fillRect(-8,-24,16,20);
+  ctx.fillStyle='#6a20c0'; ctx.fillRect(-2,-23,4,18);
+  ctx.fillStyle='rgba(120,40,220,0.3)'; ctx.fillRect(-8,-24,16,20);
+  ctx.strokeStyle='#2a0a4a'; ctx.lineWidth=1; ctx.strokeRect(-8,-24,16,20);
+
+  // shoulders
+  ctx.fillStyle='#1a0830'; ctx.fillRect(-11,-24,5,7);
+  ctx.fillRect(6,-24,5,7);
+  ctx.strokeStyle='#6a20c0'; ctx.lineWidth=1;
+  ctx.strokeRect(-11,-24,5,7); ctx.strokeRect(6,-24,5,7);
+
+  // arms
+  ctx.strokeStyle='#0d0818'; ctx.lineWidth=4;
+  ctx.beginPath(); ctx.moveTo(-9,-22); ctx.lineTo(-14,-14+arm); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(9,-22);  ctx.lineTo(14,-14-arm); ctx.stroke();
+  ctx.strokeStyle='#6a20c0'; ctx.lineWidth=1.2;
+  ctx.beginPath(); ctx.moveTo(-9,-22); ctx.lineTo(-14,-14+arm); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(9,-22);  ctx.lineTo(14,-14-arm); ctx.stroke();
+
+  // === DIAMOND PICKAXE (PERFECT POSITION) ===
+  ctx.save();
+  ctx.translate(14, -14-arm); // Ճիշտ կապ ձեռքի հետ
+  ctx.rotate(-0.4);           // Բնօրինակ թեքություն
+
+  // 1. Փայտե կոթ (Ճիշտ անկյունով)
+  ctx.strokeStyle = '#7a5530'; 
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = 'square';
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(11, 0);
+  ctx.stroke();
+
+  // 2. Ադամանդե գլխիկի մուգ եզրագիծը
+  ctx.strokeStyle = '#102020';
+  ctx.lineWidth = 5;
+  ctx.lineCap = 'square';
+  ctx.beginPath();
+  ctx.moveTo(8, -6);
+  ctx.lineTo(11, 0);
+  ctx.lineTo(8, 6);
+  ctx.stroke();
+
+  // 3. Ադամանդե կապույտ միջուկը
+  ctx.strokeStyle = '#00ffee';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(9, -5);
+  ctx.lineTo(11, 0);
+  ctx.lineTo(9, 5);
+  ctx.stroke();
+
+  ctx.restore();
+
+  // head & eyes
+  ctx.fillStyle='#0d0818'; ctx.fillRect(-7,-38,14,14);
+  ctx.strokeStyle='#2a0a4a'; ctx.lineWidth=1.5; ctx.strokeRect(-7,-38,14,14);
+  ctx.fillStyle='#070510'; ctx.fillRect(-8,-39,16,6);
+  ctx.strokeStyle='#3a0a6a'; ctx.lineWidth=1; ctx.strokeRect(-8,-39,16,6);
+  ctx.shadowColor='#a040ff'; ctx.shadowBlur=8; ctx.fillStyle='#bf5fff';
+  ctx.fillRect(-5,-33,4,3); ctx.fillRect(2,-33,4,3); ctx.shadowBlur=0;
+  ctx.fillStyle='rgba(140,40,255,0.12)'; ctx.fillRect(-7,-38,14,14);
+  ctx.restore();
+}
+
+addBlock = function(id) {
+
+  for (const s of hotbar) {
+    if (s.id === id && s.n < 64) { 
+      s.n++; 
+      return; 
+    }
+  }
+
+  for (const s of hotbar) {
+    if (!s.id) {               
+      s.id = id; 
+      s.n = 1; 
+      return; 
+    }
+  }
+}
+
+// 1. Ստեղծում ենք մեծ պայուսակը (27 սլոտ)
+window.inventory = [];
+for (let i = 0; i < 27; i++) {
+  window.inventory.push({ id: 0, n: 0 });
+}
+let showInventory = false;
+
+// 2. Բլոկներ հավաքելու ֆունկցիա (64-ի սահմանափակմամբ)
+addBlock = function(id) {
+  for (const s of hotbar) {
+    if (s.id === id && s.n < 64) { s.n++; return; }
+  }
+  for (const s of hotbar) {
+    if (!s.id || s.id === 0) { s.id = id; s.n = 1; return; }
+  }
+  for (const s of window.inventory) {
+    if (s.id === id && s.n < 64) { s.n++; return; }
+  }
+  for (const s of window.inventory) {
+    if (!s.id || s.id === 0) { s.id = id; s.n = 1; return; }
+  }
+};
+
+// 3. Կոճակի Click-ի ստուգում
+canvas.addEventListener('click', e => {
+  const r = canvas.getBoundingClientRect();
+  const cx = e.clientX - r.left;
+  const cy = e.clientY - r.top;
+
+  if (gameState === 'title') {
+    const b = PLAY_BTN;
+    if (cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h) {
+      gameState = 'playing';
+    }
+    return;
+  }
+
+  // 3 կետանոց կոճակի սեղմումը
+  if (cx >= W - 50 && cx <= W - 10 && cy >= 10 && cy <= 50) {
+    showInventory = !showInventory;
+    return;
+  }
+});
+
+// 4. Հիմնական Loop-ը, որը ԲԼՈԿՆԵՐԸ ԴՆՈՒՄ Է ՎԱՆԴԱԿՆԵՐԻ ՄԵՋ
+loop = function(t) {
+  const dt = Math.min((t - (window.lastT || t)) / 16.67, 3);
+  window.lastT = t;
+
+  if (gameState === 'title') {
+    drawTitleScreen();
+  } else {
+    // Խաղը կանգնում է, երբ պայուսակը բաց է
+    if (!showInventory) {
+      if (placeCd > 0) placeCd--;
+      updatePhysics();
+      updateMining(dt);
+      updatePlacing();
+      updateDrops();
+      updateCam();
     }
 
-    #hud-speed {
-      position: absolute;
-      bottom: 40px; right: 40px;
-      font-size: 52px; font-weight: bold;
-      color: #e10600;
-      line-height: 1;
+    drawSky();
+    drawWorld();
+    drawHighlight();
+    drawMiningOverlay();
+    drawDrops();
+    drawPlayer();
+    drawHotbar();
+    drawHUD();
+
+    // 3 կետով կոճակը վերևի աջ անկյունում
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.fillRect(W - 45, 10, 35, 35);
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(W - 45, 10, 35, 35);
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(W - 27, 18, 2.5, 0, Math.PI * 2);
+    ctx.arc(W - 27, 27, 2.5, 0, Math.PI * 2);
+    ctx.arc(W - 27, 36, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ՊԱՅՈՒՍԱԿԻ ԷԿՐԱՆԸ (INVENTORY)
+    if (showInventory) {
+      // Մեծ մոխրագույն ֆոնը
+      ctx.fillStyle = 'rgba(40, 40, 40, 0.95)';
+      ctx.fillRect(W / 2 - 210, H / 2 - 140, 420, 260);
+      ctx.strokeStyle = '#1e1e1e';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(W / 2 - 210, H / 2 - 140, 420, 260);
+
+      // Վերնագիր
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 16px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('🧳 INVENTORY', W / 2, H / 2 - 110);
+
+      let xStart = W / 2 - 188;
+      let yStart = H / 2 - 80;
+      let slotSize = 36;
+      
+      for (let row = 0; row < 3; row++) {
+        for (let col = 0; col < 9; col++) {
+          let idx = row * 9 + col;
+          let item = window.inventory[idx];
+          let slotX = xStart + col * (slotSize + 6);
+          let slotY = yStart + row * (slotSize + 6);
+          
+          // Նկարում ենք դատարկ մոխրագույն վանդակը
+          ctx.fillStyle = '#8b8b8b';
+          ctx.fillRect(slotX, slotY, slotSize, slotSize);
+          ctx.strokeStyle = '#373737';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(slotX, slotY, slotSize, slotSize);
+          
+          // Եթե այս վանդակում բլոկ կա
+          if (item && item.id > 0) {
+            ctx.save();
+            
+            // ԿԱՐԵՎՈՐ ՈՒՂՂՈՒՄ. չեզոքացնում ենք կամերայի (cam.x/y) ազդեցությունը,
+            // որպեսզի drawBlock-ը նկարի ճիշտ վանդակի ներսում
+            let fakeBx = (slotX + cam.x) / TILE;
+            let fakeBy = (slotY + cam.y) / TILE;
+            
+            // Կանչում ենք խաղի նկարելու ֆունկցիան
+            drawBlock(fakeBx, fakeBy, item.id);
+            
+            ctx.restore();
+
+            // Քանակի թիվը դնում ենք վանդակի ներքևի աջ անկյունում
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 11px monospace';
+            ctx.textAlign = 'right';
+            ctx.shadowColor = '#000';
+            ctx.shadowBlur = 3;
+            ctx.fillText(item.n, slotX + slotSize - 3, slotY + slotSize - 3);
+            ctx.shadowBlur = 0; 
+          }
+        }
+      }
+      ctx.textAlign = 'left';
     }
-    #hud-speed-label {
-      position: absolute;
-      bottom: 32px; right: 42px;
-      font-size: 14px; color: #aaa;
+  }
+  requestAnimationFrame(loop);
+};
+
+// 1. Մաքրում ենք հին երկնքի ֆունկցիան, որ խաղը չսառի
+window.drawSky = function() {};
+
+// 2. Ստեղծում ենք պայուսակի զանգվածը (27 սլոտ)
+window.inventory = [];
+for (let i = 0; i < 27; i++) {
+  window.inventory.push({ id: 0, n: 0 });
+}
+window.showInventory = false;
+
+// Օրվա ժամանակը (սկսվում է ցերեկից)
+window.gameTime = 6000; 
+
+// 3. Բլոկներ հավաքելու ճիշտ ֆունկցիան (64-ի սահմանափակմամբ)
+window.addBlock = function(id) {
+  for (const s of hotbar) {
+    if (s.id === id && s.n < 64) { s.n++; return; }
+  }
+  for (const s of hotbar) {
+    if (!s.id || s.id === 0) { s.id = id; s.n = 1; return; }
+  }
+  for (const s of window.inventory) {
+    if (s.id === id && s.n < 64) { s.n++; return; }
+  }
+  for (const s of window.inventory) {
+    if (!s.id || s.id === 0) { s.id = id; s.n = 1; return; }
+  }
+};
+
+// 4. Մկնիկի սեղմման ստուգում (3 կետանոց կոճակի համար)
+canvas.addEventListener('click', e => {
+  const r = canvas.getBoundingClientRect();
+  const cx = e.clientX - r.left;
+  const cy = e.clientY - r.top;
+
+  if (gameState === 'title') {
+    const b = PLAY_BTN;
+    if (cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h) {
+      gameState = 'playing';
     }
-    #hud-lap {
-      position: absolute;
-      top: 30px; left: 40px;
-      font-size: 22px; font-weight: bold;
-    }
-    #hud-laptime {
-      position: absolute;
-      top: 62px; left: 40px;
-      font-size: 30px; color: #ffdd00;
-    }
-    #hud-bestlap {
-      position: absolute;
-      top: 100px; left: 40px;
-      font-size: 16px; color: #aaa;
-    }
-    #hud-gear {
-      position: absolute;
-      bottom: 40px; left: 40px;
-      font-size: 18px; color: #ccc;
+    return;
+  }
+
+  if (cx >= W - 50 && cx <= W - 10 && cy >= 10 && cy <= 50) {
+    window.showInventory = !window.showInventory;
+    return;
+  }
+});
+
+// Աստղերի ստեղծում գիշերվա համար
+window.stars = [];
+for(let i=0; i<60; i++) {
+  window.stars.push({ x: Math.random() * W, y: Math.random() * (H - 150), r: Math.random() * 1.5 });
+}
+
+// 5. ԱՄԲՈՂՋԱԿԱՆ ԽԱՂԱՅԻՆ ԼՈՒՊ (ԱՎԵԼԻ ԴԱՆԴԱՂ ՕՐ/ԳԻՇԵՐՈՎ)
+window.loop = function(t) {
+  const dt = Math.min((t - (window.lastT || t)) / 16.67, 3);
+  window.lastT = t;
+
+  if (gameState === 'title') {
+    drawTitleScreen();
+  } else {
+    if (!window.showInventory) {
+      if (placeCd > 0) placeCd--;
+      updatePhysics();
+      updateMining(dt);
+      updatePlacing();
+      updateDrops();
+      updateCam();
+      
+      // ── ԱՅՍՏԵՂ Է ՓՈՓՈԽՈՒԹՅՈՒՆԸ ──
+      // +2 արագությամբ ժամանակը կգնա շատ ավելի դանդաղ ու հանգիստ
+      window.gameTime = (window.gameTime + 2) % 24000;
     }
 
-    #race-end {
-      display: none;
-      position: absolute;
-      inset: 0;
-      background: rgba(0,0,0,0.75);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      pointer-events: auto;
-    }
-    #race-end.hidden { display: none; }
-    #race-end h1 { font-size: 64px; color: #e10600; font-family: 'Courier New', monospace; }
-    #race-end p  { font-size: 24px; color: #fff; margin-top: 16px; font-family: 'Courier New', monospace; }
-    #race-end button {
-      margin-top: 32px;
-      padding: 14px 40px;
-      font-size: 20px;
-      background: #e10600;
-      color: #fff;
-      border: none;
-      cursor: pointer;
-      font-family: 'Courier New', monospace;
-      font-weight: bold;
+    // Երկնքի գույնի փոփոխություն (Day/Night)
+    let skyColor = '#4a82e8'; 
+    let starOpacity = 0;
+
+    if (window.gameTime >= 12000 && window.gameTime < 14000) {
+      // Մայրամուտ (տևում է ավելի երկար)
+      let p = (window.gameTime - 12000) / 2000;
+      skyColor = `rgb(${74 - p*44}, ${130 - p*90}, ${232 - p*172})`;
+    } else if (window.gameTime >= 14000 && window.gameTime < 16000) {
+      let p = (window.gameTime - 14000) / 2000;
+      skyColor = `rgb(${30 - p*22}, ${40 - p*32}, ${60 - p*48})`;
+      starOpacity = p;
+    } else if (window.gameTime >= 16000 && window.gameTime < 21000) {
+      // Գիշեր
+      skyColor = '#08080c';
+      starOpacity = 1;
+    } else if (window.gameTime >= 21000 && window.gameTime < 23000) {
+      // Լուսաբաց
+      let p = (window.gameTime - 21000) / 2000;
+      skyColor = `rgb(${8 + p*66}, ${8 + p*122}, ${12 + p*220})`;
+      starOpacity = 1 - p;
     }
 
-    /* Touch controls */
-    #touch-controls {
-      position: absolute;
-      bottom: 20px;
-      left: 0; right: 0;
-      display: flex;
-      justify-content: space-between;
-      padding: 0 20px;
-      pointer-events: auto;
+    // Նկարում ենք ֆոնային երկինքը
+    ctx.fillStyle = skyColor;
+    ctx.fillRect(0, 0, W, H);
+
+    // Նկարում ենք աստղերը
+    if (starOpacity > 0) {
+      ctx.fillStyle = `rgba(255, 255, 255, ${starOpacity})`;
+      for (const s of window.stars) {
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
-    .touch-group { display: flex; flex-direction: column; gap: 8px; align-items: center; }
-    .touch-btn {
-      width: 64px; height: 64px;
-      background: rgba(255,255,255,0.15);
-      border: 2px solid rgba(255,255,255,0.3);
-      border-radius: 12px;
-      font-size: 24px;
-      display: flex; align-items: center; justify-content: center;
-      user-select: none;
-      -webkit-user-select: none;
+
+    // Նկարում ենք աշխարհի օբյեկտները
+    drawWorld();
+    drawHighlight();
+    drawMiningOverlay();
+    drawDrops();
+    drawPlayer();
+    drawHotbar();
+    drawHUD();
+
+    // 3 կետով կոճակը վերևի աջ անկյունում
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.fillRect(W - 45, 10, 35, 35);
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(W - 45, 10, 35, 35);
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(W - 27, 18, 2.5, 0, Math.PI * 2);
+    ctx.arc(W - 27, 27, 2.5, 0, Math.PI * 2);
+    ctx.arc(W - 27, 36, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ՊԱՅՈՒՍԱԿԻ ԷԿՐԱՆԸ (INVENTORY)
+    if (window.showInventory) {
+      ctx.fillStyle = 'rgba(40, 40, 40, 0.95)';
+      ctx.fillRect(W / 2 - 210, H / 2 - 140, 420, 260);
+      ctx.strokeStyle = '#1e1e1e';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(W / 2 - 210, H / 2 - 140, 420, 260);
+
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 16px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('🧳 INVENTORY', W / 2, H / 2 - 110);
+
+      let xStart = W / 2 - 188;
+      let yStart = H / 2 - 80;
+      let slotSize = 36;
+      
+      for (let row = 0; row < 3; row++) {
+        for (let col = 0; col < 9; col++) {
+          let idx = row * 9 + col;
+          let item = window.inventory[idx];
+          let slotX = xStart + col * (slotSize + 6);
+          let slotY = yStart + row * (slotSize + 5);
+          
+          ctx.fillStyle = '#8b8b8b';
+          ctx.fillRect(slotX, slotY, slotSize, slotSize);
+          ctx.strokeStyle = '#373737';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(slotX, slotY, slotSize, slotSize);
+          
+          if (item && item.id > 0) {
+            ctx.save();
+            let fakeBx = (slotX + cam.x) / TILE;
+            let fakeBy = (slotY + cam.y) / TILE;
+            drawBlock(fakeBx, fakeBy, item.id);
+            ctx.restore();
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 11px monospace';
+            ctx.textAlign = 'right';
+            ctx.shadowColor = '#000';
+            ctx.shadowBlur = 3;
+            ctx.fillText(item.n, slotX + slotSize - 3, slotY + slotSize - 3);
+            ctx.shadowBlur = 0; 
+          }
+        }
+      }
+      ctx.textAlign = 'left';
     }
-  </style>
-</head>
-<body>
-  <canvas id="c"></canvas>
-  <div id="hud">
-    <div id="hud-lap">Lap 1 / 3</div>
-    <div id="hud-laptime">0:00.000</div>
-    <div id="hud-bestlap">Best: --</div>
-    <div id="hud-speed">0</div>
-    <div id="hud-speed-label">km/h</div>
-    <div id="hud-gear">Controls: W/S = throttle/brake &nbsp; A/D = steer</div>
+  }
+  requestAnimationFrame(window.loop);
+};
 
-    <div id="race-end" class="hidden">
-      <h1>RACE OVER</h1>
-      <p id="race-end-best"></p>
-      <button onclick="location.reload()">RESTART</button>
-    </div>
+// 1. ՍԱՀՄԱՆՈՒՄ ԵՆՔ ԲԼՈԿԸ
+window.CRAFTING_TABLE = 16;
+BLOCK_NAME[window.CRAFTING_TABLE] = 'Crafting Table';
+C_TOP[window.CRAFTING_TABLE] = '#b0885a';  
+C_DARK[window.CRAFTING_TABLE] = '#856643'; 
+BLOCK_HARD[window.CRAFTING_TABLE] = 1.0;   
+BLOCK_DROP[window.CRAFTING_TABLE] = window.CRAFTING_TABLE;
 
-    <div id="touch-controls">
-      <div class="touch-group">
-        <div class="touch-btn" id="btn-left">◀</div>
-        <div class="touch-btn" id="btn-right">▶</div>
-      </div>
-      <div class="touch-group">
-        <div class="touch-btn" id="btn-accel">▲</div>
-        <div class="touch-btn" id="btn-brake">▼</div>
-      </div>
-    </div>
-  </div>
+// 2. ՄԵՆՅՈՒԻ ՓՈՓՈԽԱԿԱՆՆԵՐԸ
+window.showCraftingMenu = false;
+window.craftingRecipes = [
+  { resultId: PLANKS, resultCount: 4, needId: WOOD, needCount: 1, name: '4x Planks (Cost: 1 Wood)' },
+  { resultId: window.CRAFTING_TABLE, resultCount: 1, needId: PLANKS, needCount: 4, name: '1x Crafting Table (Cost: 4 Planks)' }
+];
 
-  <script type="module" src="/src/main.js"></script>
-</body>
-</html>
+// 3. ՆԿԱՐՈՒՄ ԵՆՔ ԲԼՈԿԸ (DRAWBLOCK)
+const originalDrawBlock = drawBlock;
+drawBlock = function(bx, by, type) {
+  if (type === window.CRAFTING_TABLE) {
+    const sx = bx * TILE - cam.x;
+    const sy = by * TILE - cam.y;
+    if (sx > W + 2 || sy > H + 2 || sx + TILE < -2 || sy + TILE < -2) return;
+
+    ctx.save();
+    ctx.fillStyle = C_TOP[type]; ctx.fillRect(sx, sy, TILE, TILE);
+    ctx.fillStyle = C_DARK[type]; ctx.fillRect(sx, sy + TILE - 5, TILE, 5); ctx.fillRect(sx + TILE - 5, sy, 5, TILE - 5);
+    ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(sx, sy, TILE, 4); ctx.fillRect(sx, sy, 4, TILE);
+
+    // Grid lines վերևի մասում
+    ctx.fillStyle = '#5c4037';
+    ctx.fillRect(sx + 4, sy + 4, TILE - 8, 2); ctx.fillRect(sx + 4, sy + 12, TILE - 8, 2);
+    ctx.fillRect(sx + 10, sy + 4, 2, TILE - 8); ctx.fillRect(sx + 20, sy + 4, 2, TILE - 8);
+    
+    ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.strokeRect(sx + .5, sy + .5, TILE - 1, TILE - 1);
+    ctx.restore();
+  } else {
+    originalDrawBlock(bx, by, type);
+  }
+};
+
+// 4. ԱՄԵՆԱԿԱՐԵՎՈՐԸ՝ ՓՈԽՈՒՄ ԵՆՔ ԽԱՂԻ ԲՆԱԿԱՆ ՏԵՂԱԴՐՄԱՆ ՖՈՒՆԿՑԻԱՆ
+updatePlacing = function() {
+  // Եթե մենյուն բաց է, կանխում ենք հետևում բլոկ դնելը
+  if (window.showCraftingMenu) {
+    if (rmb && placeCd === 0) {
+      window.showCraftingMenu = false; // Աջ քլիքով փակում ենք
+      placeCd = 15;
+    }
+    
+    // Ձախ քլիքով կրաֆտ ենք անում
+    if (lmb && placeCd === 0) {
+      let menuW = 300;
+      let menuX = W / 2 - menuW / 2;
+      let menuY = H / 2 - 60;
+
+      for (let i = 0; i < window.craftingRecipes.length; i++) {
+        let btnY = menuY + 40 + i * 35;
+        
+        if (mx >= menuX + 10 && mx <= menuX + menuW - 10 && my >= btnY && my <= btnY + 28) {
+          placeCd = 15; // Քլիքի քուլդաուն
+          let recipe = window.craftingRecipes[i];
+          let foundSlot = hotbar.find(s => s.id === recipe.needId && s.n >= recipe.needCount);
+          
+          if (foundSlot) {
+            foundSlot.n -= recipe.needCount;
+            if (foundSlot.n <= 0) { foundSlot.id = AIR; foundSlot.n = 0; }
+            
+            // Ավելացնում ենք ստացված իրը
+            let added = false;
+            for (let s of hotbar) {
+              if (s.id === recipe.resultId && s.n < 64) { s.n += recipe.resultCount; added = true; break; }
+            }
+            if (!added) {
+              for (let s of hotbar) {
+                if (s.id === AIR || !s.id) { s.id = recipe.resultId; s.n = recipe.resultCount; added = true; break; }
+              }
+            }
+            if (typeof playBreak === 'function') playBreak(); // ձայնային էֆեկտ
+          }
+          break;
+        }
+      }
+    }
+    return;
+  }
+
+  // Եթե մենյուն բաց չէ, ստուգում ենք՝ արդյոք աջ քլիք ենք անում Crafting Table-ի վրա
+  if (rmb && placeCd === 0) {
+    const {bx, by} = targetBlock();
+    if (inReach(bx, by) && bx >= 0 && bx < WORLD_W && by >= 0 && by < WORLD_H) {
+      if (world[by][bx] === window.CRAFTING_TABLE) {
+        window.showCraftingMenu = true; // ԲԱՑՈՒՄ ԵՆՔ ԷԿՐԱՆԸ
+        placeCd = 15;
+        return;
+      }
+    }
+  }
+
+  // Խաղի օրիգինալ բլոկ դնելու կոդը
+  if (!rmb || placeCd > 0) return;
+  const {bx, by} = targetBlock();
+  if (!inReach(bx, by) || bx < 0 || bx >= WORLD_W || by < 0 || by >= WORLD_H) return;
+  if (world[by][bx] !== AIR) return;
+  const pl = Math.floor(P.x / TILE), pr = Math.floor((P.x + P.w - 1) / TILE);
+  const pt = Math.floor(P.y / TILE), pb = Math.floor((P.y + P.h - 1) / TILE);
+  if (bx >= pl && bx <= pr && by >= pt && by <= pb) return;
+  const s = hotbar[selSlot];
+  if (!s.id) return;
+  world[by][bx] = s.id;
+  placeCd = 10;
+};
+
+// 5. ՆԿԱՐՈՒՄ ԵՆՔ ՄԵՆՅՈՒԻ ՏԵՔՍՏԵՐԸ (DRAWHUD)
+const originalDrawHUD = drawHUD;
+drawHUD = function() {
+  originalDrawHUD();
+
+  if (window.showCraftingMenu) {
+    let menuW = 300, menuH = 160;
+    let menuX = W / 2 - menuW / 2;
+    let menuY = H / 2 - menuH / 2 - 20;
+
+    ctx.fillStyle = '#2c2c2c'; ctx.fillRect(menuX, menuY, menuW, menuH);
+    ctx.strokeStyle = '#cf9a5a'; ctx.lineWidth = 3; ctx.strokeRect(menuX, menuY, menuW, menuH);
+
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 14px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('CRAFTING TABLE', W / 2, menuY + 22);
+
+    for (let i = 0; i < window.craftingRecipes.length; i++) {
+      let recipe = window.craftingRecipes[i];
+      let btnY = menuY + 40 + i * 35;
+
+      let isHover = (mx >= menuX + 10 && mx <= menuX + menuW - 10 && my >= btnY && my <= btnY + 28);
+      ctx.fillStyle = isHover ? '#555' : '#3a3a3a';
+      ctx.fillRect(menuX + 10, btnY, menuW - 20, 28);
+      ctx.strokeStyle = '#666'; ctx.strokeRect(menuX + 10, btnY, menuW - 20, 28);
+
+      ctx.fillStyle = '#eee'; ctx.font = '11px monospace'; ctx.textAlign = 'left';
+      ctx.fillText(recipe.name, menuX + 20, btnY + 18);
+    }
+    
+    ctx.fillStyle = '#aaa'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('(Right Click anywhere to close)', W / 2, menuY + menuH - 10);
+  }
+};
+
+// 6. ՏԱԼԻՍ ԵՆՔ ՔԵԶ ՓԱՅՏ ԵՎ CRAFTING TABLE ՀԵՆՑ ՍԿԶԲԻՑ
+hotbar[3] = { id: WOOD, n: 64 };
+hotbar[8] = { id: window.CRAFTING_TABLE, n: 10 };
+selSlot = 8;
+
+// ══════════════════════════════════════════════════════
+// HUNGER SYSTEM
+// ══════════════════════════════════════════════════════
+const APPLE = 17;
+BLOCK_NAME[APPLE] = 'Apple';
+C_TOP[APPLE]  = '#ee4444';
+C_DARK[APPLE] = '#bb2222';
+BLOCK_HARD[APPLE] = Infinity;   // can't be mined as block
+BLOCK_DROP[APPLE] = APPLE;
+BLOCK_DROP[LEAVES] = APPLE;     // leaves now drop apples
+
+P.hunger    = 20;
+P.maxHunger = 20;
+window.hungerTick    = 0;
+window.hungerDmgTick = 0;
+window.eatCd         = 0;
+window.eatAnim       = 0;
+
+// Give 8 starting apples in the first free slot
+(function() {
+  for (const s of hotbar) { if (!s.id || s.id === 0) { s.id = APPLE; s.n = 8; return; } }
+})();
+
+function eatFood() {
+  const s = hotbar[selSlot];
+  if (!s || s.id !== APPLE || s.n <= 0 || window.eatCd > 0) return;
+  P.hunger = Math.min(P.maxHunger, P.hunger + 6);
+  s.n--;
+  if (s.n <= 0) { s.id = 0; s.n = 0; }
+  window.eatCd  = 25;
+  window.eatAnim = 25;
+}
+
+// F or H key = eat
+window.addEventListener('keydown', e => {
+  if ((e.key === 'f' || e.key === 'F' || e.key === 'h' || e.key === 'H') && gameState === 'playing') {
+    eatFood(); e.preventDefault();
+  }
+});
+
+// Right-click with apple = eat instead of place
+const _hungerPlacing = updatePlacing;
+updatePlacing = function() {
+  if (rmb && placeCd === 0 && hotbar[selSlot].id === APPLE) { eatFood(); return; }
+  _hungerPlacing();
+};
+
+// Hunger ticks + starvation damage
+const _hungerPhysics = updatePhysics;
+updatePhysics = function() {
+  _hungerPhysics();
+  if (window.eatCd > 0) window.eatCd--;
+  if (window.deathMsg > 100) return;
+
+  window.hungerTick++;
+  if (window.hungerTick > 400) {
+    window.hungerTick = 0;
+    if (P.hunger > 0) P.hunger--;
+  }
+
+  if (P.hunger === 0) {
+    window.hungerDmgTick++;
+    if (window.hungerDmgTick > 240) {
+      window.hungerDmgTick = 0;
+      if (typeof takeDamage === 'function') takeDamage(1);
+    }
+  } else {
+    window.hungerDmgTick = 0;
+  }
+};
+
+// Pixel-art drumstick (9 cols × 8 rows)
+function drawDrumstick(ctx, x, y, sz, type) {
+  const MAP = [
+    [0,0,1,1,1,1,0,0,0],
+    [0,1,1,1,1,1,1,0,0],
+    [0,1,1,1,1,1,1,0,0],
+    [0,0,1,1,1,1,0,0,0],
+    [0,0,0,1,1,0,0,0,0],
+    [0,0,0,1,1,0,0,0,0],
+    [0,0,1,1,1,1,0,0,0],
+    [0,0,1,0,0,1,0,0,0],
+  ];
+  const C = {
+    full:  ['#d4873c','#e8aa60','#9a5818'],
+    empty: ['#3a2010','#4e3018','#201008'],
+  };
+  const p = sz / 9;
+  for (let r = 0; r < 8; r++) {
+    for (let col = 0; col < 9; col++) {
+      if (!MAP[r][col]) continue;
+      const pal = (type === 'half' && col >= 5) ? C.empty : C[type] || C.empty;
+      const shade = r < 2 ? pal[1] : (col <= 1 || col >= 6) ? pal[2] : pal[0];
+      ctx.fillStyle = shade;
+      ctx.fillRect(x + col * p, y + r * p, p + 0.5, p + 0.5);
+    }
+  }
+}
+
+// HUD override: drumstick row above hearts
+const _hungerHUD = drawHUD;
+drawHUD = function() {
+  _hungerHUD();
+
+  const SZ = 18, GAP = 2, N = P.maxHunger / 2;
+  const tot = N * (SZ + GAP) - GAP;
+  const dx  = (W - tot) / 2;
+  const dy  = H - 44 - 8 - SZ - 8 - SZ - 5;   // row above hearts
+
+  for (let i = 0; i < N; i++) {
+    const full = P.hunger >= (i + 1) * 2;
+    const half = !full && P.hunger > i * 2;
+    drawDrumstick(ctx, dx + i * (SZ + GAP), dy, SZ,
+                  full ? 'full' : (half ? 'half' : 'empty'));
+  }
+
+  // Golden glow when eating
+  if (window.eatAnim > 0) {
+    ctx.fillStyle = `rgba(255,200,50,${(window.eatAnim / 25) * 0.18})`;
+    ctx.fillRect(0, 0, W, H);
+    window.eatAnim--;
+  }
+
+  // Orange pulse warning when starving (hunger < 4)
+  if (P.hunger < 4 && P.hunger > 0) {
+    const f = (Math.sin(Date.now() * 0.005) * 0.5 + 0.5) * 0.12;
+    ctx.fillStyle = `rgba(255,100,0,${f})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+};
+
+// ══════════════════════════════════════════════════════
+// HP / LIFE SYSTEM
+// ══════════════════════════════════════════════════════
+P.hp    = 20;
+P.maxHp = 20;
+window.hpRegen  = 0;
+window.dmgFlash = 0;
+window.deathMsg = 0;
+let _airHighestY = null;
+
+function takeDamage(amount) {
+  if (amount <= 0 || window.deathMsg > 80) return;
+  P.hp = Math.max(0, P.hp - Math.floor(amount));
+  window.dmgFlash = 20;
+  window.hpRegen  = 0;
+  if (P.hp <= 0) {
+    window.deathMsg = 150;
+    setTimeout(() => { P.hp = P.maxHp; spawnPlayer(); }, 1500);
+  }
+}
+
+// Fall damage + regen
+const _hpPhysics = updatePhysics;
+updatePhysics = function() {
+  if (window.deathMsg > 100) return;
+  const wasOnGround = P.onGround;
+  _hpPhysics();
+
+  if (!P.onGround) {
+    if (_airHighestY === null || P.y < _airHighestY) _airHighestY = P.y;
+  }
+  if (!wasOnGround && P.onGround && _airHighestY !== null) {
+    const fell = (P.y - _airHighestY) / TILE;
+    if (fell > 3.5) takeDamage(Math.ceil((fell - 3.5) * 2));
+    _airHighestY = null;
+  }
+  if (P.onGround) _airHighestY = null;
+
+  // Void instant kill
+  if (P.y > WORLD_H * TILE + 40) takeDamage(P.hp);
+
+  // Regen: +1 HP every ~5 s
+  window.hpRegen++;
+  if (window.hpRegen > 300 && P.hp > 0 && P.hp < P.maxHp) {
+    P.hp++;
+    window.hpRegen = 0;
+  }
+};
+
+// Pixel-art heart (9×8 grid)
+function drawPixelHeart(ctx, x, y, sz, type) {
+  const MAP = [
+    [0,1,1,0,0,0,1,1,0],
+    [1,2,1,1,0,1,1,3,1],
+    [1,1,1,1,1,1,1,1,1],
+    [1,1,1,1,1,1,1,1,1],
+    [0,1,1,1,1,1,1,1,0],
+    [0,0,1,1,1,1,1,0,0],
+    [0,0,0,1,1,1,0,0,0],
+    [0,0,0,0,1,0,0,0,0],
+  ];
+  const COLS = {
+    full:  ['#ff3333','#ff7070','#aa1111'],
+    half:  ['#ff3333','#ff7070','#aa1111'],
+    empty: ['#3d0000','#550000','#200000'],
+  };
+  const p = sz / 9;
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 9; c++) {
+      const v = MAP[r][c];
+      if (!v) continue;
+      const pal = (type === 'half' && c >= 5) ? COLS.empty : COLS[type];
+      ctx.fillStyle = v === 2 ? pal[1] : (v === 3 ? pal[2] : pal[0]);
+      ctx.fillRect(x + c * p, y + r * p, p + 0.5, p + 0.5);
+    }
+  }
+}
+
+// HUD override — draws hearts above hotbar
+const _hpHUD = drawHUD;
+drawHUD = function() {
+  _hpHUD();
+
+  const SZ = 18, GAP = 2, N = P.maxHp / 2;
+  const tot = N * (SZ + GAP) - GAP;
+  const hx  = (W - tot) / 2;
+  const hy  = H - 44 - 8 - SZ - 8;
+
+  for (let i = 0; i < N; i++) {
+    const full = P.hp >= (i + 1) * 2;
+    const half = !full && P.hp > i * 2;
+    drawPixelHeart(ctx, hx + i * (SZ + GAP), hy, SZ,
+                   full ? 'full' : (half ? 'half' : 'empty'));
+  }
+
+  // Red damage flash
+  if (window.dmgFlash > 0) {
+    ctx.fillStyle = `rgba(200,0,0,${(window.dmgFlash / 20) * 0.4})`;
+    ctx.fillRect(0, 0, W, H);
+    window.dmgFlash--;
+  }
+
+  // "YOU DIED" overlay
+  if (window.deathMsg > 0) {
+    const a = Math.min(1, window.deathMsg / 40);
+    ctx.fillStyle = `rgba(0,0,0,${a * 0.65})`;
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.shadowColor = '#ff0000'; ctx.shadowBlur = 30;
+    ctx.fillStyle = `rgba(255,50,50,${a})`;
+    ctx.font = 'bold 42px monospace';
+    ctx.fillText('YOU DIED', W / 2, H / 2 - 14);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = `rgba(200,200,200,${a * 0.75})`;
+    ctx.font = '13px monospace';
+    ctx.fillText('Respawning...', W / 2, H / 2 + 18);
+    ctx.textAlign = 'left';
+    window.deathMsg--;
+  }
+};
+
+// ══════════════════════════════════════════════════════
+// RAW BEEF (hunger +1 per piece)
+// ══════════════════════════════════════════════════════
+const MEAT = 18;
+BLOCK_NAME[MEAT] = 'Raw Beef';
+C_TOP[MEAT]      = '#C03535';
+C_DARK[MEAT]     = '#7A1010';
+BLOCK_HARD[MEAT] = Infinity;
+BLOCK_DROP[MEAT] = MEAT;
+
+// 5 starting pieces in the first free hotbar slot
+(function() {
+  for (const s of hotbar) { if (!s.id || s.id === 0) { s.id = MEAT; s.n = 5; return; } }
+})();
+
+// Food restore table — extend here for future food items
+const FOOD_RESTORE = { [APPLE]: 6, [MEAT]: 1 };
+
+// Replace eatFood to handle all food types
+eatFood = function() {
+  const s = hotbar[selSlot];
+  if (!s || window.eatCd > 0) return;
+  const r = FOOD_RESTORE[s.id];
+  if (!r) return;
+  P.hunger = Math.min(P.maxHunger, P.hunger + r);
+  // Any non-apple food restores +1 HP
+  if (s.id !== APPLE) {
+    P.hp = Math.min(P.maxHp, P.hp + 1);
+    window.dmgFlash = 0;
+  }
+  s.n--;
+  if (s.n <= 0) { s.id = 0; s.n = 0; }
+  window.eatCd   = 25;
+  window.eatAnim = 25;
+};
+
+// Right-click with any food = eat it
+const _meatPlacing = updatePlacing;
+updatePlacing = function() {
+  if (rmb && placeCd === 0 && FOOD_RESTORE[hotbar[selSlot].id]) { eatFood(); return; }
+  _meatPlacing();
+};
+
+// Pixel-art raw beef icon (10 cols × 8 rows)
+function drawMeatIcon(ctx, x, y, size) {
+  const MAP = [
+    [0,0,3,1,2,1,1,2,0,0],
+    [0,3,1,2,1,1,2,1,1,0],
+    [3,1,1,1,2,1,1,2,1,0],
+    [1,2,1,2,1,1,2,1,2,0],
+    [0,1,2,1,1,2,1,1,2,0],
+    [0,0,1,2,1,1,2,1,0,0],
+    [0,0,0,1,1,2,1,0,0,0],
+    [0,0,0,0,1,1,0,0,0,0],
+  ];
+  const C = ['', '#C03535', '#7A1010', '#D95050'];
+  const p = size / 10;
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 10; c++) {
+      const v = MAP[r][c];
+      if (!v) continue;
+      ctx.fillStyle = C[v];
+      ctx.fillRect(x + c * p, y + r * p, p + 0.5, p + 0.5);
+    }
+  }
+}
+
+// ══════════════════════════════════════════════════════
+// MOB SYSTEM
+// ══════════════════════════════════════════════════════
+const PORK = 19;
+BLOCK_NAME[PORK] = 'Raw Pork';
+C_TOP[PORK]      = '#F4A0A0';
+C_DARK[PORK]     = '#D47080';
+BLOCK_HARD[PORK] = Infinity;
+BLOCK_DROP[PORK] = PORK;
+FOOD_RESTORE[PORK] = 1;
+
+
+const ENDER_PEARL = 21;
+BLOCK_NAME[ENDER_PEARL] = 'Ender Pearl';
+C_TOP[ENDER_PEARL]      = '#5533cc';
+C_DARK[ENDER_PEARL]     = '#3311aa';
+BLOCK_HARD[ENDER_PEARL] = Infinity;
+BLOCK_DROP[ENDER_PEARL] = ENDER_PEARL;
+
+const GUNPOWDER = 22;
+BLOCK_NAME[GUNPOWDER] = 'Gunpowder';
+C_TOP[GUNPOWDER]      = '#888888';
+C_DARK[GUNPOWDER]     = '#555555';
+BLOCK_HARD[GUNPOWDER] = Infinity;
+BLOCK_DROP[GUNPOWDER] = GUNPOWDER;
+
+const BONE = 23;
+BLOCK_NAME[BONE] = 'Bone';
+C_TOP[BONE]      = '#e8e0c8';
+C_DARK[BONE]     = '#b0a888';
+BLOCK_HARD[BONE] = Infinity;
+BLOCK_DROP[BONE] = BONE;
+
+const MOB_CFG = {
+  cow:      { hp:10, w:30, h:24, spd:1.1, hostile:false, dropId:MEAT,        dropAmt:2, dmg:1 },
+  pig:      { hp:8,  w:24, h:18, spd:1.3, hostile:false, dropId:PORK,        dropAmt:1, dmg:1 },
+  zombie:   { hp:15, w:16, h:32, spd:1.0, hostile:true,  dropId:0,           dropAmt:0, dmg:1 },
+  enderman: { hp:30, w:14, h:50, spd:0.9, hostile:true,  dropId:ENDER_PEARL, dropAmt:1, dmg:2 },
+  creeper:  { hp:10, w:14, h:30, spd:0.8, hostile:true,  dropId:GUNPOWDER,   dropAmt:1, dmg:0 },
+  skeleton: { hp:12, w:14, h:32, spd:1.0, hostile:true,  dropId:BONE,        dropAmt:1, dmg:0 },
+};
+
+const mobs = [];
+window.mobHitCd    = 0;
+window.zombieAtkCd = 0;
+window.mobArrows   = [];
+
+function spawnMob(type, wx, wy) {
+  const c = MOB_CFG[type];
+  mobs.push({ x:wx, y:wy, vx:0, vy:0, w:c.w, h:c.h,
+    hp:c.hp, maxHp:c.hp, type, onGround:false,
+    facing:1, frame:0, aiTimer:Math.floor(Math.random()*60),
+    hitFlash:0, dead:false });
+}
+
+function spawnInitialMobs() {
+  const cx = Math.floor(WORLD_W / 2);
+  let passive = 0, hostile = 0;
+  for (let attempt = 0; attempt < 200 && (passive < 8 || hostile < 5); attempt++) {
+    const bx = Math.max(3, Math.min(WORLD_W-3, cx + Math.floor((Math.random()-0.5)*120)));
+    let surf = -1;
+    for (let y = 0; y < WORLD_H; y++) { if (world[y][bx] !== AIR) { surf = y; break; } }
+    if (surf < 2) continue;
+    if (passive < 8) {
+      const type = Math.random() < 0.55 ? 'cow' : 'pig';
+      const c = MOB_CFG[type];
+      spawnMob(type, bx*TILE, (surf-2)*TILE - c.h + TILE);
+      passive++;
+    } else if (hostile < 5) {
+      spawnMob('zombie', bx*TILE, (surf-2)*TILE);
+      hostile++;
+    }
+  }
+}
+
+function updateMobs(dt) {
+  if (window.mobHitCd > 0)    window.mobHitCd--;
+  if (window.zombieAtkCd > 0) window.zombieAtkCd--;
+
+  for (const mob of mobs) {
+    if (mob.dead) continue;
+    if (mob.hitFlash > 0) mob.hitFlash--;
+
+    const c = MOB_CFG[mob.type];
+
+    // AI tick
+    mob.aiTimer--;
+    if (mob.aiTimer <= 0) {
+      mob.aiTimer = 50 + Math.floor(Math.random()*80);
+      if (!c.hostile) {
+        const r = Math.random();
+        if      (r < 0.3) mob.vx = 0;
+        else if (r < 0.65){ mob.vx = -c.spd; mob.facing = -1; }
+        else               { mob.vx =  c.spd; mob.facing =  1; }
+      }
+    }
+
+    // Hostile: continuously chase player
+    if (c.hostile) {
+      const dx = (P.x + P.w/2) - (mob.x + mob.w/2);
+      const dist = Math.abs(dx);
+
+      if (mob.type === 'skeleton') {
+        // Skeleton: ranged attacker — keep distance and shoot arrows
+        const fullDist = Math.hypot(dx, (P.y+P.h/2)-(mob.y+mob.h/2));
+        if (fullDist < TILE * 14) {
+          mob.facing = Math.sign(dx) || 1;
+          if (fullDist < TILE * 3) {
+            mob.vx = -Math.sign(dx) * c.spd; // back away if too close
+          } else if (fullDist > TILE * 7) {
+            mob.vx = Math.sign(dx) * c.spd * 0.5; // close in if too far
+          } else {
+            mob.vx = 0; // hold position and shoot
+          }
+          mob.shotCd = (mob.shotCd || 80) - 1;
+          if (mob.shotCd <= 0 && fullDist < TILE * 12) {
+            mob.shotCd = 80;
+            const angle = Math.atan2((P.y+P.h/2)-(mob.y+mob.h/2), dx);
+            window.mobArrows.push({
+              x: mob.x + mob.w/2, y: mob.y + mob.h*0.4,
+              vx: Math.cos(angle) * 5.5, vy: Math.sin(angle) * 5.5,
+              dead: false
+            });
+          }
+        } else {
+          mob.vx = 0;
+        }
+      } else {
+        if (dist < TILE*14) {
+          mob.vx = Math.sign(dx) * c.spd;
+          mob.facing = Math.sign(dx) || 1;
+        } else {
+          mob.vx = 0;
+        }
+        if (mob.type === 'creeper') {
+          // Creeper fuse — explodes when close
+          const cd = Math.hypot((P.x+P.w/2)-(mob.x+mob.w/2), (P.y+P.h/2)-(mob.y+mob.h/2));
+          if (cd < TILE * 1) {
+            mob.fuse = (mob.fuse || 0) + 1;
+            mob.vx = 0; // freeze while fusing
+            if (Math.floor(mob.fuse / 6) % 2 === 1) mob.hitFlash = 2; // flash white
+            if (mob.fuse >= 55) {
+              mob.dead = true;
+              if (cd < TILE * 5) takeDamage(cd < TILE * 2 ? 5 : 3);
+              const ex = Math.floor((mob.x + mob.w/2) / TILE);
+              const ey = Math.floor((mob.y + mob.h/2) / TILE);
+              for (let edy = -4; edy <= 4; edy++) {
+                for (let edx = -4; edx <= 4; edx++) {
+                  if (edx*edx + edy*edy > 20) continue;
+                  const bx2 = ex+edx, by2 = ey+edy;
+                  if (bx2 >= 0 && bx2 < WORLD_W && by2 >= 0 && by2 < WORLD_H
+                      && world[by2][bx2] !== AIR && world[by2][bx2] !== BEDROCK)
+                    world[by2][bx2] = AIR;
+                }
+              }
+              window.dmgFlash = 1;
+              playBreak();
+            }
+          } else {
+            mob.fuse = 0;
+          }
+        } else {
+          // Attack player on contact (zombie, enderman)
+          if (dist < mob.w/2 + P.w/2 + 4 &&
+              Math.abs((mob.y+mob.h/2)-(P.y+P.h/2)) < mob.h &&
+              window.zombieAtkCd <= 0) {
+            takeDamage(c.dmg || 1);
+            window.zombieAtkCd = 70;
+          }
+        }
+      }
+    }
+
+    // Jump over walls
+    if (mob.onGround && mob.vx !== 0) {
+      const fx = mob.x + (mob.vx > 0 ? mob.w+2 : -2);
+      if (solidAt(fx, mob.y + mob.h/2)) { mob.vy = -9.5; mob.onGround = false; }
+    }
+
+    // Gravity + physics (mirrors player)
+    mob.vy = Math.min(mob.vy + GRAVITY, 18);
+    mob.x += mob.vx;
+    mob.x = Math.max(0, Math.min(mob.x, WORLD_W*TILE - mob.w));
+    if (mob.vx < 0 && (solidAt(mob.x, mob.y+2)||solidAt(mob.x, mob.y+mob.h-2)))
+      { mob.x=Math.ceil(mob.x/TILE)*TILE; mob.vx=0; }
+    if (mob.vx > 0 && (solidAt(mob.x+mob.w, mob.y+2)||solidAt(mob.x+mob.w, mob.y+mob.h-2)))
+      { mob.x=Math.floor((mob.x+mob.w)/TILE)*TILE-mob.w; mob.vx=0; }
+    mob.y += mob.vy; mob.onGround = false;
+    if (mob.vy > 0 && (solidAt(mob.x+2,mob.y+mob.h)||solidAt(mob.x+mob.w-2,mob.y+mob.h)))
+      { mob.y=Math.floor((mob.y+mob.h)/TILE)*TILE-mob.h; mob.vy=0; mob.onGround=true; }
+    if (mob.vy < 0 && (solidAt(mob.x+2,mob.y)||solidAt(mob.x+mob.w-2,mob.y)))
+      { mob.y=Math.ceil(mob.y/TILE)*TILE; mob.vy=0; }
+    if (mob.y > WORLD_H*TILE) mob.dead = true;
+    if (mob.onGround && Math.abs(mob.vx) > 0.2) mob.frame += 0.12;
+  }
+
+  // Remove dead mobs and spawn drops
+  for (let i = mobs.length-1; i >= 0; i--) {
+    if (!mobs[i].dead) continue;
+    const m = mobs[i], c = MOB_CFG[m.type];
+    for (let k = 0; k < c.dropAmt; k++)
+      drops.push({ x:m.x+m.w/2, y:m.y, vx:(Math.random()-.5)*3, vy:-4, id:c.dropId });
+    mobs.splice(i, 1);
+  }
+
+  // Update skeleton arrows
+  for (const arr of window.mobArrows) {
+    arr.vy += 0.25; // light gravity
+    arr.x  += arr.vx;
+    arr.y  += arr.vy;
+    // Hit player
+    if (!arr.dead &&
+        arr.x > P.x && arr.x < P.x+P.w &&
+        arr.y > P.y && arr.y < P.y+P.h) {
+      takeDamage(2);
+      arr.dead = true;
+    }
+    // Hit solid block
+    if (!arr.dead && solidAt(arr.x, arr.y)) arr.dead = true;
+    // Out of world
+    if (arr.y > WORLD_H * TILE) arr.dead = true;
+  }
+  window.mobArrows = window.mobArrows.filter(a => !a.dead);
+}
+
+function tryHitMob() {
+  if (!lmb || window.mobHitCd > 0) return false;
+  const wx = mx + cam.x, wy = my + cam.y;
+  for (const mob of mobs) {
+    if (mob.dead) continue;
+    if (wx < mob.x || wx > mob.x+mob.w || wy < mob.y || wy > mob.y+mob.h) continue;
+    const dist = Math.hypot(mob.x+mob.w/2-(P.x+P.w/2), mob.y+mob.h/2-(P.y+P.h/2));
+    if (dist > TILE*5) continue;
+    mob.hp -= 2;
+    mob.hitFlash = 10;
+    mob.vx = (mob.x > P.x ? 3.5 : -3.5);
+    mob.vy = -5;
+    window.mobHitCd = 18;
+    playBreak();
+    if (mob.hp <= 0) mob.dead = true;
+    return true;
+  }
+  return false;
+}
+
+// Drawing helpers
+function drawCow(sx, sy, mob) {
+  const leg = Math.sin(mob.frame) * 4;
+  ctx.save();
+  ctx.translate(sx + mob.w/2, sy + mob.h);
+  ctx.scale(mob.facing, 1);
+  // legs
+  ctx.fillStyle = '#5a3a18';
+  ctx.fillRect(-11,-8,5,8+leg); ctx.fillRect(-4,-8,5,8-leg);
+  ctx.fillRect(2, -8,5,8-leg); ctx.fillRect(8, -8,5,8+leg);
+  // body
+  ctx.fillStyle = '#8B5E3C'; ctx.fillRect(-13,-20,26,14);
+  ctx.fillStyle = '#d0c0a0'; ctx.fillRect(-6,-18,12,8); // belly
+  // head
+  ctx.fillStyle = '#8B5E3C'; ctx.fillRect(10,-26,14,12);
+  ctx.fillStyle = '#a07050'; ctx.fillRect(21,-22,4,5); // snout
+  ctx.fillStyle = '#111'; ctx.fillRect(13,-24,3,3); // eye
+  // horns
+  ctx.fillStyle = '#eee';
+  ctx.fillRect(11,-29,3,5); ctx.fillRect(17,-29,3,5);
+  ctx.restore();
+}
+
+function drawPig(sx, sy, mob) {
+  const leg = Math.sin(mob.frame) * 3;
+  ctx.save();
+  ctx.translate(sx + mob.w/2, sy + mob.h);
+  ctx.scale(mob.facing, 1);
+  ctx.fillStyle = '#D47080';
+  ctx.fillRect(-8,-6,4,6+leg); ctx.fillRect(-2,-6,4,6-leg);
+  ctx.fillRect(3,-6,4,6-leg); ctx.fillRect(7,-6,4,6+leg);
+  ctx.fillStyle = '#F4A0A0'; ctx.fillRect(-10,-16,20,12);
+  ctx.fillRect(7,-20,12,10); // head
+  ctx.fillStyle = '#e08080'; ctx.fillRect(16,-18,4,4); // snout
+  ctx.fillStyle = '#905050';
+  ctx.fillRect(17,-17,1,2); ctx.fillRect(19,-17,1,2); // nostrils
+  ctx.fillStyle = '#111'; ctx.fillRect(9,-18,3,3); // eye
+  ctx.restore();
+}
+
+function drawZombie(sx, sy, mob) {
+  const legSwing = Math.sin(mob.frame) * 5;
+  ctx.save();
+  ctx.translate(sx + mob.w/2, sy + mob.h);
+  ctx.scale(mob.facing, 1);
+
+  const SKIN  = '#70b030', SKIN_D  = '#4a7a20';
+  const SHIRT = '#3a6fa0', SHIRT_D = '#284870';
+  const PANTS = '#3030a8', PANTS_D = '#1e1e78';
+
+  // Left leg
+  ctx.fillStyle = PANTS;
+  ctx.fillRect(-5, -11 + legSwing, 4, 11);
+  ctx.fillStyle = PANTS_D;
+  ctx.fillRect(-2, -11 + legSwing, 1, 11);
+
+  // Right leg
+  ctx.fillStyle = PANTS;
+  ctx.fillRect(1, -11 - legSwing, 4, 11);
+  ctx.fillStyle = PANTS_D;
+  ctx.fillRect(4, -11 - legSwing, 1, 11);
+
+  // Body — teal/blue shirt
+  ctx.fillStyle = SHIRT;
+  ctx.fillRect(-6, -21, 12, 10);
+  ctx.fillStyle = SHIRT_D;
+  ctx.fillRect(5, -21, 1, 10);
+
+  // Front arm outstretched forward (zombie pose)
+  ctx.fillStyle = SKIN;
+  ctx.fillRect(6, -23, 11, 4);
+  ctx.fillStyle = SKIN_D;
+  ctx.fillRect(6, -20, 11, 1);
+
+  // Back arm (also forward, darker)
+  ctx.fillStyle = SKIN_D;
+  ctx.fillRect(-17, -23, 11, 4);
+
+  // Head — green skin
+  ctx.fillStyle = SKIN;
+  ctx.fillRect(-5, -32, 10, 11);
+  ctx.fillStyle = SKIN_D;
+  ctx.fillRect(4, -32, 1, 11);
+  ctx.fillStyle = '#88c840';
+  ctx.fillRect(-5, -32, 10, 2);
+
+  // Eyes
+  ctx.fillStyle = '#111';
+  ctx.fillRect(-3, -29, 3, 2);
+  ctx.fillRect(1,  -29, 3, 2);
+  ctx.fillStyle = '#e03030';
+  ctx.fillRect(-3, -29, 2, 1);
+  ctx.fillRect(2,  -29, 2, 1);
+
+  // Mouth with teeth
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(-2, -26, 5, 2);
+  ctx.fillStyle = '#dddddd';
+  ctx.fillRect(-2, -26, 1, 1);
+  ctx.fillRect(0,  -26, 1, 1);
+  ctx.fillRect(2,  -26, 1, 1);
+
+  ctx.restore();
+}
+
+function drawEnderman(sx, sy, mob) {
+  const leg = Math.sin(mob.frame) * 6;
+  ctx.save();
+  ctx.translate(sx + mob.w/2, sy + mob.h);
+  ctx.scale(mob.facing, 1);
+
+  const BLK  = '#0d0d12';
+  const BLK2 = '#060608';
+
+  // Long thin legs
+  ctx.fillStyle = BLK;
+  ctx.fillRect(-4, -24, 3, 24 + leg);
+  ctx.fillRect( 1, -24, 3, 24 - leg);
+
+  // Narrow body
+  ctx.fillStyle = BLK;
+  ctx.fillRect(-4, -40, 8, 16);
+  ctx.fillStyle = BLK2;
+  ctx.fillRect( 3, -40, 1, 16);
+
+  // Long thin arms hanging at sides
+  ctx.fillStyle = BLK;
+  ctx.fillRect(-7, -39, 2, 28 - leg);
+  ctx.fillRect( 5, -39, 2, 28 + leg);
+
+  // Small square head
+  ctx.fillStyle = BLK;
+  ctx.fillRect(-5, -50, 10, 10);
+
+  // Purple glowing eyes
+  ctx.shadowColor = '#aa00ff';
+  ctx.shadowBlur = 10;
+  ctx.fillStyle = '#cc44ff';
+  ctx.fillRect(-3, -47, 2, 2);
+  ctx.fillRect( 1, -47, 2, 2);
+  ctx.shadowBlur = 0;
+
+  // Purple particle dots on body
+  ctx.fillStyle = '#7700bb';
+  ctx.fillRect(-1, -36, 2, 2);
+  ctx.fillRect(-2, -30, 2, 2);
+  ctx.fillRect( 0, -25, 2, 2);
+
+  ctx.restore();
+}
+
+function drawCreeper(sx, sy, mob) {
+  const legSwing = Math.sin(mob.frame) * 4;
+  const fusing   = (mob.fuse || 0) > 0;
+  const flash    = fusing && Math.floor((mob.fuse || 0) / 6) % 2 === 1;
+  ctx.save();
+  ctx.translate(sx + mob.w/2, sy + mob.h);
+  ctx.scale(mob.facing, 1);
+
+  const G1 = flash ? '#ffffff' : '#43a043';
+  const G2 = flash ? '#cccccc' : '#2a6a2a';
+  const G3 = flash ? '#eeeeee' : '#347034';
+
+  // 4 short legs (2 shown alternating)
+  ctx.fillStyle = G2;
+  ctx.fillRect(-5, -8 + legSwing, 4, 8);
+  ctx.fillRect( 1, -8 - legSwing, 4, 8);
+  ctx.fillStyle = G3;
+  ctx.fillRect(-2, -8 + legSwing, 1, 8);
+  ctx.fillRect( 4, -8 - legSwing, 1, 8);
+
+  // Body
+  ctx.fillStyle = G1;
+  ctx.fillRect(-6, -22, 12, 14);
+  // Mossy dark patches
+  ctx.fillStyle = G2;
+  ctx.fillRect(-6, -22, 3, 4);
+  ctx.fillRect( 2, -19, 4, 5);
+  ctx.fillRect(-3, -14, 5, 4);
+  // Right shade
+  ctx.fillStyle = G3;
+  ctx.fillRect( 5, -22, 1, 14);
+
+  // Head
+  ctx.fillStyle = G1;
+  ctx.fillRect(-6, -32, 12, 10);
+  ctx.fillStyle = G2;
+  ctx.fillRect(-6, -32, 4, 3);
+  ctx.fillRect( 2, -30, 3, 4);
+  ctx.fillStyle = G3;
+  ctx.fillRect( 5, -32, 1, 10);
+
+  // Iconic creeper face (no face when fully flashing)
+  if (!flash) {
+    ctx.fillStyle = '#111';
+    // Eyes
+    ctx.fillRect(-4, -30, 3, 3);
+    ctx.fillRect( 1, -30, 3, 3);
+    // Frown: two top blocks, center drops down
+    ctx.fillRect(-3, -26, 2, 2);
+    ctx.fillRect( 1, -26, 2, 2);
+    ctx.fillRect(-1, -25, 2, 3);
+  }
+
+  ctx.restore();
+}
+
+function drawSkeleton(sx, sy, mob) {
+  const legSwing = Math.sin(mob.frame) * 0.4;
+  const legLen   = 13;
+  ctx.save();
+  ctx.translate(sx + mob.w/2, sy + mob.h);
+  ctx.scale(mob.facing, 1);
+  ctx.lineCap = 'square';
+
+  const BONE_C  = '#d0cbb8';
+  const BONE_D  = '#9a9580';
+
+  // Legs (thin bone strokes)
+  const lLegX = -3 + Math.sin( legSwing) * legLen;
+  const lLegY = -1 + Math.cos( legSwing) * legLen;
+  const rLegX =  3 + Math.sin(-legSwing) * legLen;
+  const rLegY = -1 + Math.cos(-legSwing) * legLen;
+  ctx.strokeStyle = BONE_C; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(-3, -1); ctx.lineTo(lLegX, lLegY); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo( 3, -1); ctx.lineTo(rLegX, rLegY); ctx.stroke();
+
+  // Thin body with ribcage lines
+  ctx.fillStyle = BONE_C;
+  ctx.fillRect(-4, -20, 8, 19);
+  ctx.strokeStyle = BONE_D; ctx.lineWidth = 1;
+  for (let i = 0; i < 4; i++) {
+    ctx.beginPath(); ctx.moveTo(-4, -18+i*4); ctx.lineTo(4, -18+i*4); ctx.stroke();
+  }
+  ctx.fillStyle = BONE_D; ctx.fillRect(3, -20, 1, 19); // side shade
+
+  // Back arm
+  ctx.strokeStyle = BONE_C; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(-4, -18); ctx.lineTo(-11, -10); ctx.stroke();
+
+  // Front arm (holding bow — angled forward)
+  ctx.beginPath(); ctx.moveTo(4, -18); ctx.lineTo(13, -14); ctx.stroke();
+
+  // Bow held in front hand
+  ctx.strokeStyle = '#6a3e10'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(15, -16, 6, -Math.PI*0.65, Math.PI*0.65); ctx.stroke();
+  // Bowstring
+  ctx.strokeStyle = '#c8c870'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(15, -22); ctx.lineTo(15, -10); ctx.stroke();
+
+  // Head (skull block)
+  ctx.fillStyle = BONE_C;
+  ctx.fillRect(-5, -31, 10, 11);
+  ctx.fillStyle = BONE_D; ctx.fillRect(4, -31, 1, 11);
+
+  // Hollow dark eye sockets
+  ctx.fillStyle = '#111';
+  ctx.fillRect(-4, -29, 3, 3);
+  ctx.fillRect( 1, -29, 3, 3);
+
+  // Nose cavity
+  ctx.fillStyle = '#2a2a2a';
+  ctx.fillRect(-1, -26, 2, 2);
+
+  // Skull teeth (grin)
+  ctx.fillStyle = BONE_C;
+  ctx.fillRect(-3, -23, 1, 2);
+  ctx.fillRect(-1, -23, 1, 2);
+  ctx.fillRect( 1, -23, 1, 2);
+  ctx.fillRect( 3, -23, 1, 2);
+  ctx.fillStyle = '#111';
+  ctx.fillRect(-2, -23, 1, 2);
+  ctx.fillRect( 0, -23, 1, 2);
+  ctx.fillRect( 2, -23, 1, 2);
+
+  ctx.restore();
+}
+
+function drawArrows() {
+  ctx.save();
+  for (const arr of window.mobArrows) {
+    const ax = arr.x - cam.x, ay = arr.y - cam.y;
+    ctx.save();
+    ctx.translate(ax, ay);
+    ctx.rotate(Math.atan2(arr.vy, arr.vx));
+    // Shaft
+    ctx.fillStyle = '#8b5e20';
+    ctx.fillRect(-7, -1, 14, 2);
+    // Arrowhead (darker grey)
+    ctx.fillStyle = '#778888';
+    ctx.fillRect(7, -2, 5, 4);
+    // Fletching
+    ctx.fillStyle = '#ddddbb';
+    ctx.fillRect(-10, -3, 4, 2);
+    ctx.fillRect(-10,  1, 4, 2);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+function drawMobs() {
+  drawArrows();
+  for (const mob of mobs) {
+    if (mob.dead) continue;
+    const sx = Math.round(mob.x - cam.x), sy = Math.round(mob.y - cam.y);
+    if (sx > W+50||sy > H+50||sx+mob.w < -50||sy+mob.h < -50) continue;
+    ctx.save();
+    if (mob.hitFlash > 0) { ctx.filter='brightness(4)'; ctx.globalAlpha = 0.6+Math.sin(mob.hitFlash)*0.4; }
+    if (mob.type==='cow')    drawCow(sx, sy, mob);
+    else if (mob.type==='pig')      drawPig(sx, sy, mob);
+    else if (mob.type==='zombie')   drawZombie(sx, sy, mob);
+    else if (mob.type==='enderman') drawEnderman(sx, sy, mob);
+    else if (mob.type==='creeper')  drawCreeper(sx, sy, mob);
+    else if (mob.type==='skeleton') drawSkeleton(sx, sy, mob);
+    ctx.restore();
+    // HP bar (only when damaged)
+    if (mob.hp < mob.maxHp) {
+      const bw=mob.w+8, bx=sx-4, by=sy-11;
+      ctx.fillStyle='#400'; ctx.fillRect(bx,by,bw,5);
+      ctx.fillStyle='#0d0'; ctx.fillRect(bx,by,Math.round(bw*mob.hp/mob.maxHp),5);
+      ctx.strokeStyle='#000'; ctx.lineWidth=1; ctx.strokeRect(bx,by,bw,5);
+    }
+  }
+}
+
+// Intercept mining to allow hitting mobs
+const _mineBeforeMobs = updateMining;
+updateMining = function(dt) {
+  if (tryHitMob()) return;
+  _mineBeforeMobs(dt);
+};
+
+// Hook updateDrops (runs in physics phase) to also update mobs
+const _dropsUpdateMobs = updateDrops;
+updateDrops = function() {
+  updateMobs();
+  _dropsUpdateMobs();
+};
+
+// Hook drawDrops (runs in draw phase) to also draw mobs
+const _drawDropsMobs = drawDrops;
+drawDrops = function() {
+  _drawDropsMobs();
+  drawMobs();
+};
+
+// Boost meat food restore to make combat rewarding
+FOOD_RESTORE[MEAT] = 4;
+
+// Night spawning
+window.nightSpawnTimer = 0;
+const MAX_ZOMBIES = 12;
+
+function nightSpawn() {
+  const isNight = window.gameTime >= 14000 && window.gameTime < 21000;
+  if (!isNight) return;
+
+  const hostileCount = mobs.filter(m => MOB_CFG[m.type] && MOB_CFG[m.type].hostile).length;
+  if (hostileCount >= MAX_ZOMBIES) return;
+
+  window.nightSpawnTimer++;
+  if (window.nightSpawnTimer < 180) return; // try every ~3 seconds
+  window.nightSpawnTimer = 0;
+
+  // Pick a random surface tile 15-40 tiles away from the player
+  const px = Math.floor((P.x + P.w / 2) / TILE);
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const bx = Math.max(2, Math.min(WORLD_W - 2,
+      px + side * (15 + Math.floor(Math.random() * 25))));
+    let surf = -1;
+    for (let y = 0; y < WORLD_H; y++) {
+      if (world[y][bx] !== AIR) { surf = y; break; }
+    }
+    if (surf < 2) continue;
+    // pick a hostile type: 45% zombie, 25% skeleton, 20% creeper, 10% enderman
+    const r = Math.random();
+    const spawnType = r < 0.45 ? 'zombie' : r < 0.70 ? 'skeleton' : r < 0.90 ? 'creeper' : 'enderman';
+    spawnMob(spawnType, bx * TILE, (surf - 1) * TILE - MOB_CFG[spawnType].h);
+    break;
+  }
+}
+
+// Hook nightSpawn into the physics update
+const _nightSpawnPhysics = updatePhysics;
+updatePhysics = function() {
+  nightSpawn();
+  _nightSpawnPhysics();
+};
+
+// Spawn mobs after world is ready
+spawnInitialMobs();
+
+// ══════════════════════════════════════════════════════
+// BED SYSTEM
+// ══════════════════════════════════════════════════════
+const BED = 20;
+BLOCK_NAME[BED] = 'Bed';
+C_TOP[BED]  = '#cc3333';
+C_DARK[BED] = '#882222';
+BLOCK_HARD[BED] = 0.8;
+BLOCK_DROP[BED] = BED;
+
+// Add bed to crafting recipes
+window.craftingRecipes.push(
+  { resultId: BED, resultCount: 1, needId: PLANKS, needCount: 3, name: '1x Bed (Cost: 3 Planks)' }
+);
+
+// Draw bed block
+const _drawBlockBeforeBed = drawBlock;
+drawBlock = function(bx, by, type) {
+  if (type !== BED) { _drawBlockBeforeBed(bx, by, type); return; }
+  const sx = bx * TILE - cam.x, sy = by * TILE - cam.y;
+  if (sx > W+2 || sy > H+2 || sx+TILE < -2 || sy+TILE < -2) return;
+  // Frame / wooden base
+  ctx.fillStyle = '#a07040'; ctx.fillRect(sx, sy, TILE, TILE);
+  // Red blanket
+  ctx.fillStyle = '#cc3333'; ctx.fillRect(sx+3, sy+3, TILE-6, TILE-10);
+  // White pillow
+  ctx.fillStyle = '#f0f0f0'; ctx.fillRect(sx+4, sy+TILE-11, 10, 7);
+  ctx.fillStyle = '#d8d8d8'; ctx.fillRect(sx+5, sy+TILE-10, 8, 5);
+  // Blanket folds
+  ctx.fillStyle = '#aa2020';
+  ctx.fillRect(sx+3, sy+10, TILE-6, 2);
+  ctx.fillRect(sx+3, sy+16, TILE-6, 2);
+  // Border
+  ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1;
+  ctx.strokeRect(sx+0.5, sy+0.5, TILE-1, TILE-1);
+};
+
+// Sleeping state
+window.sleeping    = false;
+window.sleepTimer  = 0;
+
+// Right-click on bed → sleep
+const _bedPlacing = updatePlacing;
+updatePlacing = function() {
+  if (!window.sleeping && rmb && placeCd === 0) {
+    const { bx, by } = targetBlock();
+    if (inReach(bx, by) && bx >= 0 && bx < WORLD_W && by >= 0 && by < WORLD_H) {
+      if (world[by][bx] === BED) {
+        window.sleeping   = true;
+        window.sleepTimer = 80;
+        placeCd = 20;
+        return;
+      }
+    }
+  }
+  _bedPlacing();
+};
+
+// Sleep timer ticks during physics
+const _bedPhysics = updatePhysics;
+updatePhysics = function() {
+  if (window.sleeping) {
+    window.sleepTimer--;
+    if (window.sleepTimer <= 0) {
+      window.gameTime = 400;           // jump to early morning
+      window.sleeping = false;
+      P.hp     = Math.min(P.maxHp,     P.hp     + 6);
+      P.hunger = Math.min(P.maxHunger, P.hunger + 4);
+    }
+    return; // freeze player while sleeping
+  }
+  _bedPhysics();
+};
+
+// Draw sleeping overlay on top of everything
+const _bedHUD = drawHUD;
+drawHUD = function() {
+  _bedHUD();
+  if (!window.sleeping) return;
+  const fade = 1 - window.sleepTimer / 80;
+  ctx.fillStyle = `rgba(0,0,20,${0.3 + fade * 0.6})`;
+  ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 24px monospace';
+  ctx.fillStyle = `rgba(180,180,220,${fade})`;
+  ctx.fillText('💤  Sleeping...', W/2, H/2);
+  ctx.textAlign = 'left';
+};
+
+
+// ══════════════════════════════════════════════════════
+// MOBILE / TOUCH SUPPORT
+// ══════════════════════════════════════════════════════
+;(function() {
+  const BSZ = 64, GAP = 8;
+  const hotbarTop = H - 52;
+  const rowY  = hotbarTop - BSZ - 6;
+  const jumpY = rowY - BSZ - 6;
+
+  const VB = {
+    left:  { x: 12,                  y: rowY,  w: BSZ, h: BSZ, lbl: '◀' },
+    right: { x: 12 + BSZ + GAP,      y: rowY,  w: BSZ, h: BSZ, lbl: '▶' },
+    jump:  { x: 12 + (BSZ + GAP)/2,  y: jumpY, w: BSZ, h: BSZ, lbl: '▲' },
+    mine:  { x: W - BSZ - 12,        y: rowY,  w: BSZ, h: BSZ, lbl: '⛏' },
+    place: { x: W - 2*BSZ - GAP - 12, y: rowY, w: BSZ, h: BSZ, lbl: '🧱' },
+  };
+
+  window._hasTouched = false;
+  window._vPressed   = {};
+  const touchMap     = {};
+
+  function hitVBtn(tx, ty) {
+    for (const [k, b] of Object.entries(VB))
+      if (tx >= b.x && tx < b.x+b.w && ty >= b.y && ty < b.y+b.h) return k;
+    return null;
+  }
+
+  function syncToInputs() {
+    keys['ArrowLeft']  = !!window._vPressed.left;
+    keys['ArrowRight'] = !!window._vPressed.right;
+    const worldActive = Object.values(touchMap).some(v => v === 'world');
+    lmb = !!(window._vPressed.mine || (worldActive && !window.showInventory));
+    rmb = !!window._vPressed.place;
+  }
+
+  // Inventory slot interaction called directly from touch (e.preventDefault blocks synthetic mouse events)
+  function doInvTouch(tx, ty) {
+    // ⋮ button: close inventory
+    if (tx >= W-50 && tx <= W-10 && ty >= 10 && ty <= 50) {
+      if (window.heldItem && window.heldItem.id > 0) {
+        const all = [...hotbar, ...window.inventory];
+        for (const s of all) {
+          if (s.id === window.heldItem.id && s.n < 64) {
+            const add = Math.min(64 - s.n, window.heldItem.n);
+            s.n += add; window.heldItem.n -= add;
+            if (window.heldItem.n <= 0) { window.heldItem = { id:0, n:0 }; break; }
+          }
+        }
+        if (window.heldItem.n > 0) {
+          for (const s of all) {
+            if (!s.id || s.id === 0) { s.id = window.heldItem.id; s.n = window.heldItem.n; break; }
+          }
+          window.heldItem = { id:0, n:0 };
+        }
+      }
+      window.showInventory = false;
+      return;
+    }
+    const hit = getInventorySlotAt(tx, ty);
+    if (!hit) return;
+    const item = hit.arr[hit.idx];
+    if (!window.heldItem || window.heldItem.id === 0) {
+      if (item.id > 0) { window.heldItem = { id: item.id, n: item.n }; item.id = 0; item.n = 0; }
+    } else if (item.id === 0) {
+      item.id = window.heldItem.id; item.n = window.heldItem.n; window.heldItem = { id:0, n:0 };
+    } else if (item.id === window.heldItem.id) {
+      const add = Math.min(64 - item.n, window.heldItem.n);
+      item.n += add; window.heldItem.n -= add;
+      if (window.heldItem.n <= 0) window.heldItem = { id:0, n:0 };
+    } else {
+      const tmp = { id: item.id, n: item.n };
+      item.id = window.heldItem.id; item.n = window.heldItem.n; window.heldItem = tmp;
+    }
+  }
+
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    window._hasTouched = true;
+    for (const t of e.changedTouches) {
+      const r  = canvas.getBoundingClientRect();
+      const tx = t.clientX - r.left, ty = t.clientY - r.top;
+
+      if (window.showInventory) { doInvTouch(tx, ty); continue; }
+
+      const btn = hitVBtn(tx, ty);
+      if (btn) {
+        touchMap[t.identifier] = btn;
+        window._vPressed[btn]  = true;
+        if (btn === 'jump') { keys[' '] = true; setTimeout(function(){ keys[' '] = false; }, 120); }
+      } else {
+        // Hotbar slot tap → select slot
+        const sz = 44, pad = 3;
+        const sx0 = (W - 9*(sz+pad)) / 2, sy0 = H - sz - 8;
+        if (ty >= sy0 && ty < sy0 + sz) {
+          const i = Math.floor((tx - sx0) / (sz + pad));
+          if (i >= 0 && i < 9) { selSlot = i; continue; }
+        }
+        // World touch → aim + mine
+        touchMap[t.identifier] = 'world';
+        mx = tx; my = ty;
+      }
+    }
+    syncToInputs();
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    for (const t of e.changedTouches) {
+      if (touchMap[t.identifier] === 'world') {
+        const r = canvas.getBoundingClientRect();
+        mx = t.clientX - r.left;
+        my = t.clientY - r.top;
+      }
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', function(e) {
+    e.preventDefault();
+    for (const t of e.changedTouches) {
+      const role = touchMap[t.identifier];
+      if (role && role !== 'world') window._vPressed[role] = false;
+      delete touchMap[t.identifier];
+    }
+    syncToInputs();
+  }, { passive: false });
+
+  canvas.addEventListener('touchcancel', function(e) {
+    for (const t of e.changedTouches) {
+      const role = touchMap[t.identifier];
+      if (role && role !== 'world') window._vPressed[role] = false;
+      delete touchMap[t.identifier];
+    }
+    syncToInputs();
+  }, { passive: false });
+
+  // Draw virtual buttons layered on top of HUD
+  const _mobileHUD = drawHUD;
+  drawHUD = function() {
+    _mobileHUD();
+    if (gameState !== 'playing' || window.showInventory || !window._hasTouched) return;
+    ctx.save();
+    ctx.textAlign = 'center';
+    for (const [name, b] of Object.entries(VB)) {
+      const active = !!window._vPressed[name];
+      ctx.globalAlpha = active ? 0.82 : 0.42;
+      ctx.fillStyle = active ? '#ffffff' : '#cccccc';
+      const rr = 14;
+      ctx.beginPath();
+      ctx.moveTo(b.x + rr, b.y);
+      ctx.arcTo(b.x + b.w, b.y,     b.x + b.w, b.y + b.h, rr);
+      ctx.arcTo(b.x + b.w, b.y + b.h, b.x,     b.y + b.h, rr);
+      ctx.arcTo(b.x,       b.y + b.h, b.x,     b.y,       rr);
+      ctx.arcTo(b.x,       b.y,       b.x + b.w, b.y,     rr);
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = active ? 1.0 : 0.85;
+      ctx.fillStyle = '#111111';
+      ctx.font = 'bold 26px monospace';
+      ctx.fillText(b.lbl, b.x + b.w / 2, b.y + b.h / 2 + 10);
+    }
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'left';
+    ctx.restore();
+  };
+})();
+
+// Override drawHotbar: draw pixel meat on top of any MEAT slot
+const _meatHotbar = drawHotbar;
+drawHotbar = function() {
+  _meatHotbar();
+  const sz = 44, pad = 3;
+  const sx0 = (W - 9 * (sz + pad)) / 2, sy0 = H - sz - 8;
+  for (let i = 0; i < 9; i++) {
+    if (hotbar[i].id !== MEAT) continue;
+    const sx = sx0 + i * (sz + pad);
+    ctx.fillStyle = '#8B8B8B';
+    ctx.fillRect(sx + 6, sy0 + 6, 32, 32);
+    drawMeatIcon(ctx, sx + 6, sy0 + 6, 32);
+    ctx.strokeStyle = '#222'; ctx.lineWidth = 1;
+    ctx.strokeRect(sx + 6, sy0 + 6, 32, 32);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 10px monospace';
+    ctx.fillText(hotbar[i].n, sx + sz - 15, sy0 + sz - 4);
+  }
+};
+
+// ══════════════════════════════════════════════════════
+// INVENTORY INTERACTION (click-to-move items)
+// ══════════════════════════════════════════════════════
+window.heldItem = { id: 0, n: 0 };
+
+function getInventorySlotAt(cx, cy) {
+  const slotSize = 36;
+  // Inventory grid (3 rows × 9 cols)
+  const xStart = W / 2 - 188;
+  const yStart = H / 2 - 80;
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 9; col++) {
+      const slotX = xStart + col * (slotSize + 6);
+      const slotY = yStart + row * (slotSize + 5);
+      if (cx >= slotX && cx < slotX + slotSize && cy >= slotY && cy < slotY + slotSize) {
+        return { arr: window.inventory, idx: row * 9 + col };
+      }
+    }
+  }
+  // Hotbar row (only interact with it while inventory is open)
+  const sz = 44, pad = 3;
+  const sx0 = (W - 9 * (sz + pad)) / 2;
+  const sy0 = H - sz - 8;
+  for (let i = 0; i < 9; i++) {
+    const slotX = sx0 + i * (sz + pad);
+    if (cx >= slotX && cx < slotX + sz && cy >= sy0 && cy < sy0 + sz) {
+      return { arr: hotbar, idx: i };
+    }
+  }
+  return null;
+}
+
+canvas.addEventListener('mousedown', function(e) {
+  if (!window.showInventory) return;
+  const r = canvas.getBoundingClientRect();
+  const cx = e.clientX - r.left;
+  const cy = e.clientY - r.top;
+  const hit = getInventorySlotAt(cx, cy);
+  if (!hit) return;
+  e.stopPropagation();
+
+  const item = hit.arr[hit.idx];
+
+  if (e.button === 0) {
+    // Left click: pick up full stack / place / merge / swap
+    if (window.heldItem.id === 0) {
+      if (item.id > 0) {
+        window.heldItem = { id: item.id, n: item.n };
+        item.id = 0; item.n = 0;
+      }
+    } else {
+      if (item.id === 0) {
+        item.id = window.heldItem.id; item.n = window.heldItem.n;
+        window.heldItem = { id: 0, n: 0 };
+      } else if (item.id === window.heldItem.id) {
+        const space = 64 - item.n;
+        const add = Math.min(space, window.heldItem.n);
+        item.n += add;
+        window.heldItem.n -= add;
+        if (window.heldItem.n <= 0) window.heldItem = { id: 0, n: 0 };
+      } else {
+        const tmp = { id: item.id, n: item.n };
+        item.id = window.heldItem.id; item.n = window.heldItem.n;
+        window.heldItem = tmp;
+      }
+    }
+  } else if (e.button === 2) {
+    // Right click: pick up half / place 1
+    if (window.heldItem.id === 0) {
+      if (item.id > 0) {
+        const half = Math.ceil(item.n / 2);
+        window.heldItem = { id: item.id, n: half };
+        item.n -= half;
+        if (item.n <= 0) { item.id = 0; item.n = 0; }
+      }
+    } else {
+      if (item.id === 0 || item.id === window.heldItem.id) {
+        if (item.n < 64) {
+          if (item.id === 0) item.id = window.heldItem.id;
+          item.n++;
+          window.heldItem.n--;
+          if (window.heldItem.n <= 0) window.heldItem = { id: 0, n: 0 };
+        }
+      }
+    }
+  }
+});
+
+// Draw held item following the cursor
+const _invHUD = drawHUD;
+drawHUD = function() {
+  _invHUD();
+  if (!window.showInventory || window.heldItem.id === 0) return;
+  const sz = 32;
+  const hx = mx - sz / 2, hy = my - sz / 2;
+  ctx.fillStyle = C_TOP[window.heldItem.id] || '#888';
+  ctx.fillRect(hx, hy, sz, sz);
+  ctx.fillStyle = C_DARK[window.heldItem.id] || '#555';
+  ctx.fillRect(hx, hy + sz - 6, sz, 6);
+  ctx.fillRect(hx + sz - 6, hy, 6, sz - 6);
+  ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5;
+  ctx.strokeRect(hx, hy, sz, sz);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 10px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText(window.heldItem.n, hx + sz - 14, hy + sz - 3);
+};
+
+// I key: toggle inventory  |  Escape: close and return held item
+window.addEventListener('keydown', function(e) {
+  const toggleOpen = e.key === 'i' || e.key === 'I';
+  const forceClose = e.key === 'Escape';
+  if (!toggleOpen && !forceClose) return;
+  if (!window.showInventory && !toggleOpen) return;
+
+  // Return held item to any free slot
+  if (window.heldItem.id > 0) {
+    const all = [...hotbar, ...window.inventory];
+    for (const s of all) {
+      if (s.id === window.heldItem.id && s.n < 64) {
+        const add = Math.min(64 - s.n, window.heldItem.n);
+        s.n += add; window.heldItem.n -= add;
+        if (window.heldItem.n <= 0) { window.heldItem = { id: 0, n: 0 }; break; }
+      }
+    }
+    if (window.heldItem.n > 0) {
+      for (const s of all) {
+        if (!s.id || s.id === 0) {
+          s.id = window.heldItem.id; s.n = window.heldItem.n;
+          window.heldItem = { id: 0, n: 0 }; break;
+        }
+      }
+    }
+    window.heldItem = { id: 0, n: 0 };
+  }
+
+  if (toggleOpen) {
+    window.showInventory = !window.showInventory;
+  } else {
+    window.showInventory = false;
+  }
+  e.preventDefault();
+});
+
+</script>
