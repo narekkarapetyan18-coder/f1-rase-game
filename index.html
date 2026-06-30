@@ -262,7 +262,7 @@ const RAW_WAYPOINTS = [
 
 const curve = new THREE.CatmullRomCurve3(RAW_WAYPOINTS, true);
 const SEGMENTS = 400;
-const pts = curve.getPoints(SEGMENTS);
+const pts = Array.from({ length: SEGMENTS }, (_, i) => curve.getPoint(i / SEGMENTS));
 
 const TRACK_W = 7.0;   // half-width
 const KERB_W  = 2.5;
@@ -315,11 +315,11 @@ function buildKerbs(points, innerHW, kerbHW, colA, colB, yOff) {
   const n = points.length;
   const STRIPE = 5;
   for (let side = -1; side <= 1; side += 2) {
-    for (let i = 0; i < n - 1; i++) {
+    for (let i = 0; i < n; i++) {
       const stripe = Math.floor(i / STRIPE);
       const mat = (stripe % 2 === 0) ? matA : matB;
       const curr = points[i];
-      const next = points[i + 1];
+      const next = points[(i + 1) % n];
       const dir  = new THREE.Vector3().subVectors(next, curr).normalize();
       const right = new THREE.Vector3(dir.z, 0, -dir.x).multiplyScalar(side);
 
@@ -364,11 +364,11 @@ function buildFence(points, offsetHW) {
   for (let side = -1; side <= 1; side += 2) {
     const sidePos = [];
     for (let i = 0; i < n; i += STEP) {
-      const curr  = points[i];
-      const next  = points[(i + 1) % n];
-      const dir   = new THREE.Vector3().subVectors(next, curr).normalize();
-      const right = new THREE.Vector3(dir.z, 0, -dir.x).multiplyScalar(side);
-      sidePos.push(curr.clone().addScaledVector(right, offsetHW));
+      const curr = points[i];
+      const next = points[(i + 1) % n];
+      const dir  = new THREE.Vector3().subVectors(next, curr).normalize();
+      const right = new THREE.Vector3(dir.z, 0, -dir.x);
+      sidePos.push(curr.clone().addScaledVector(right, side * offsetHW));
     }
 
     const cnt = sidePos.length;
@@ -461,7 +461,7 @@ checkpoints.forEach(cp => {
   scene.add(flag);
 });
 
-// ─── F1 Car ───────────────────────────────────────────────────────────────────
+// ─── Supra Car ────────────────────────────────────────────────────────────────
 function makeBox(w, h, d, col, x, y, z, shine = 60) {
   const geo = new THREE.BoxGeometry(w, h, d);
   const mat = new THREE.MeshPhongMaterial({ color: col, shininess: shine });
@@ -471,36 +471,65 @@ function makeBox(w, h, d, col, x, y, z, shine = 60) {
   return mesh;
 }
 
-const carGroup = new THREE.Group();
-carGroup.add(makeBox(2.2, 0.38, 4.4, 0xb8bcc8, 0, 0.38, 0, 120));
-carGroup.add(makeBox(0.9, 0.42, 1.0, 0x1a2535, 0, 0.72, 0.2));
-carGroup.add(makeBox(0.08, 0.55, 0.9, 0x222222, 0, 0.95, 0.2));
-carGroup.add(makeBox(0.7, 0.28, 1.0, 0xb8bcc8, 0, 0.32, 2.5, 120));
-carGroup.add(makeBox(2.8, 0.1, 0.45, 0x0d1433, 0, 0.16, 2.9));
-carGroup.add(makeBox(2.4, 0.72, 0.16, 0xb8bcc8, 0, 0.88, -2.15, 120));
-[-1.2, 1.2].forEach(x => carGroup.add(makeBox(0.12, 0.72, 0.5, 0xb8bcc8, x, 0.88, -2.15, 120)));
-carGroup.add(makeBox(1.6, 0.08, 3.8, 0x0d0d0d, 0, 0.18, 0));
-carGroup.add(makeBox(0.1, 0.34, 3.6, 0x1a4ab0, -1.1, 0.42, 0));
-carGroup.add(makeBox(0.1, 0.34, 3.6, 0x1a4ab0,  1.1, 0.42, 0));
+const YELLOW = 0xc9e000;
+const BLACK  = 0x111111;
+const DARK   = 0x06080f;
 
-const wheelMat = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 10 });
-const hubMat   = new THREE.MeshPhongMaterial({ color: 0x1a4ab0, shininess: 100 });
+const carGroup = new THREE.Group();
+// Lower chassis
+carGroup.add(makeBox(2.02, 0.30, 4.6,  YELLOW, 0,     0.30,  0,     160));
+// Upper body (widens for fenders)
+carGroup.add(makeBox(2.20, 0.26, 3.6,  YELLOW, 0,     0.56, -0.1,   160));
+// Cabin / greenhouse
+carGroup.add(makeBox(1.30, 0.42, 1.85, DARK,   0,     0.84, -0.22));
+// A-pillar join strip
+carGroup.add(makeBox(1.38, 0.08, 0.22, DARK,   0,     0.68,  0.72));
+// Hood flat
+carGroup.add(makeBox(1.78, 0.09, 1.40, YELLOW, 0,     0.64,  1.10,  160));
+// Hood front slope
+carGroup.add(makeBox(1.84, 0.17, 0.55, YELLOW, 0,     0.54,  1.93,  160));
+// Front bumper
+carGroup.add(makeBox(2.12, 0.26, 0.18, BLACK,  0,     0.34,  2.36));
+// Front splitter
+carGroup.add(makeBox(1.92, 0.07, 0.36, BLACK,  0,     0.12,  2.37));
+// Headlights L / R
+carGroup.add(makeBox(0.52, 0.13, 0.08, 0xeeeeff, -0.66, 0.59, 2.44, 220));
+carGroup.add(makeBox(0.52, 0.13, 0.08, 0xeeeeff,  0.66, 0.59, 2.44, 220));
+// Rear bumper
+carGroup.add(makeBox(2.02, 0.26, 0.18, BLACK,  0,     0.34, -2.34));
+// Rear spoiler base
+carGroup.add(makeBox(1.74, 0.06, 0.28, BLACK,  0,     0.76, -2.12));
+// Rear spoiler blade
+carGroup.add(makeBox(1.74, 0.17, 0.09, YELLOW, 0,     0.86, -2.12, 160));
+// Side sills L / R
+carGroup.add(makeBox(0.13, 0.14, 4.0,  BLACK, -1.08, 0.22,  0));
+carGroup.add(makeBox(0.13, 0.14, 4.0,  BLACK,  1.08, 0.22,  0));
+// Tail-lights L / R
+carGroup.add(makeBox(0.48, 0.14, 0.07, 0xff2200, -0.64, 0.52, -2.42, 120));
+carGroup.add(makeBox(0.48, 0.14, 0.07, 0xff2200,  0.64, 0.52, -2.42, 120));
+
+const tireMat  = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 10 });
+const rimMat   = new THREE.MeshPhongMaterial({ color: 0xbbbbbb, shininess: 220 });
+const lugMat   = new THREE.MeshPhongMaterial({ color: 0x333333, shininess: 60 });
 const wheelPositions = [
-  [-1.18, 0.35, 1.6],
-  [ 1.18, 0.35, 1.6],
-  [-1.18, 0.35,-1.55],
-  [ 1.18, 0.35,-1.55],
+  [-1.16, 0.40,  1.58],
+  [ 1.16, 0.40,  1.58],
+  [-1.16, 0.40, -1.58],
+  [ 1.16, 0.40, -1.58],
 ];
 const wheels = [];
 wheelPositions.forEach(([wx, wy, wz]) => {
   const wGroup = new THREE.Group();
-  const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.38, 0.32, 10), wheelMat);
+  const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.40, 0.40, 0.40, 14), tireMat);
+  tire.rotation.z = Math.PI / 2;
+  tire.castShadow = true;
+  wGroup.add(tire);
+  const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.42, 10), rimMat);
   rim.rotation.z = Math.PI / 2;
-  rim.castShadow = true;
   wGroup.add(rim);
-  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.34, 6), hubMat);
-  hub.rotation.z = Math.PI / 2;
-  wGroup.add(hub);
+  const lug = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.44, 5), lugMat);
+  lug.rotation.z = Math.PI / 2;
+  wGroup.add(lug);
   wGroup.position.set(wx, wy, wz);
   carGroup.add(wGroup);
   wheels.push(wGroup);
@@ -625,17 +654,17 @@ function loop() {
 
     const throttle = up ? 1 : (down ? -0.6 : 0);
     if (throttle > 0) {
-      car.speed += throttle * 48 * dt;
+      car.speed += throttle * 160 * dt;
     } else if (throttle < 0) {
       if (car.speed > 0) {
-        car.speed += throttle * 60 * dt;
+        car.speed += throttle * 180 * dt;
       } else {
-        car.speed += throttle * 18 * dt;
+        car.speed += throttle * 35 * dt;
       }
     }
 
-    car.speed *= Math.pow(0.982, dt * 60);
-    car.speed = Math.max(-12, Math.min(100, car.speed));
+    car.speed *= Math.pow(0.974, dt * 60);
+    car.speed = Math.max(-22, Math.min(140, car.speed));
 
     if (Math.abs(car.speed) > 0.5 && lapStart === null) {
       lapStart = now;
@@ -653,10 +682,30 @@ function loop() {
     car.pos.z += Math.cos(car.heading) * car.speed * dt;
     car.pos.y  = 0.5;
 
+    // ── Fence collision ────────────────────────────────────────────────────
+    {
+      const FENCE_R = TRACK_W + KERB_W + 0.5; // inner wall the car centre can't cross
+      let minD2 = Infinity, nearX = 0, nearZ = 0;
+      for (let i = 0; i < pts.length; i++) {
+        const dx = car.pos.x - pts[i].x;
+        const dz = car.pos.z - pts[i].z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 < minD2) { minD2 = d2; nearX = pts[i].x; nearZ = pts[i].z; }
+      }
+      const dist = Math.sqrt(minD2);
+      if (dist > FENCE_R) {
+        const nx = (car.pos.x - nearX) / dist;
+        const nz = (car.pos.z - nearZ) / dist;
+        car.pos.x = nearX + nx * FENCE_R;
+        car.pos.z = nearZ + nz * FENCE_R;
+        car.speed *= 0.25;
+      }
+    }
+
     // ── Update 3D Car ──────────────────────────────────────────────────────
     carGroup.position.copy(car.pos);
     carGroup.rotation.y = car.heading;
-    const wheelSpin = (car.speed / 0.38) * dt;
+    const wheelSpin = (car.speed / 0.40) * dt;
     wheels.forEach(w => { w.children[0].rotation.x += wheelSpin; });
     const steerVis = steerInput * 0.38;
     wheels[0].rotation.y = steerVis;
