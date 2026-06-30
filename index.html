@@ -13,7 +13,7 @@ canvas { display:block; }
   position:absolute; top:18px; left:50%; transform:translateX(-50%);
   text-align:center; color:#fff; font-size:14px; letter-spacing:1px;
   text-shadow:1px 1px 3px #000;
-  pointer-events:none;
+  pointer-events:none; display:none;
 }
 #instructions span {
   background:rgba(30,40,70,0.75); border-radius:4px;
@@ -26,7 +26,7 @@ canvas { display:block; }
 
 #hud {
   position:absolute; bottom:0; left:0; right:0;
-  display:flex; align-items:stretch;
+  display:none; align-items:stretch;
   background:rgba(10,20,50,0.88);
   border-top:2px solid #1a3a6a;
   height:72px; pointer-events:none;
@@ -50,6 +50,41 @@ canvas { display:block; }
   color:#ffdd00; font-size:64px; font-weight:bold; letter-spacing:6px;
   text-shadow:0 0 20px #ff8800, 2px 2px 0 #000;
   display:none; pointer-events:none;
+}
+
+/* ─── Main Menu ────────────────────────────────────────────────────────────── */
+#main-menu {
+  position:absolute; top:0; left:0; right:0; bottom:0;
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  background:linear-gradient(175deg,rgba(12,20,52,0.82) 0%,rgba(8,14,38,0.76) 100%);
+  z-index:100; user-select:none;
+}
+#menu-title {
+  font-family:Arial,sans-serif; font-size:90px; font-weight:900; font-style:italic;
+  color:#c8d8f8;
+  text-shadow:0 0 28px rgba(150,185,255,0.65),0 0 60px rgba(80,140,255,0.22),2px 2px 0 rgba(0,0,0,0.55);
+  letter-spacing:5px; margin-bottom:70px; margin-top:-30px;
+}
+#menu-buttons { display:flex; gap:14px; }
+.menu-btn {
+  width:155px; height:155px;
+  background:rgba(16,30,76,0.92);
+  border:none; border-radius:4px;
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  cursor:pointer; transition:background 0.14s; gap:14px;
+}
+.menu-btn:hover { background:rgba(36,56,118,0.98); }
+.menu-btn svg { width:62px; height:62px; fill:#fff; }
+.menu-btn-label {
+  color:#fff; font-size:14px; font-family:'Courier New',monospace;
+  letter-spacing:2px; font-weight:bold; text-transform:uppercase;
+}
+#menu-bottom {
+  position:absolute; bottom:18px; left:50%; transform:translateX(-50%);
+  color:rgba(165,190,232,0.6); font-size:13px; letter-spacing:1px;
+  white-space:nowrap; pointer-events:none;
 }
 </style>
 </head>
@@ -86,6 +121,46 @@ canvas { display:block; }
 </div>
 
 <div id="go-msg">GO!</div>
+
+<!-- ─── Main Menu ──────────────────────────────────────────────────────────── -->
+<div id="main-menu">
+  <div id="menu-title">F1 Race</div>
+  <div id="menu-buttons">
+
+    <!-- Garage -->
+    <button class="menu-btn" id="btn-garage">
+      <svg viewBox="0 0 64 64">
+        <rect x="26" y="10" width="12" height="38" rx="5"/>
+        <rect x="12" y="22" width="40" height="14" rx="4"/>
+        <ellipse cx="16" cy="17" rx="5" ry="7"/>
+        <ellipse cx="48" cy="17" rx="5" ry="7"/>
+        <ellipse cx="16" cy="47" rx="5" ry="7"/>
+        <ellipse cx="48" cy="47" rx="5" ry="7"/>
+        <rect x="28" y="6" width="8" height="6" rx="2"/>
+      </svg>
+      <span class="menu-btn-label">Garage</span>
+    </button>
+
+    <!-- Settings -->
+    <button class="menu-btn" id="btn-settings">
+      <svg viewBox="0 0 64 64">
+        <path d="M32 22a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 16a6 6 0 1 1 0-12 6 6 0 0 1 0 12z"/>
+        <path d="M53 28h-3.8a17.4 17.4 0 0 0-1.5-3.6l2.7-2.7-7.1-7.1-2.7 2.7A17.4 17.4 0 0 0 37 15.8V12H27v3.8a17.4 17.4 0 0 0-3.6 1.5l-2.7-2.7-7.1 7.1 2.7 2.7A17.4 17.4 0 0 0 14.8 28H11v8h3.8a17.4 17.4 0 0 0 1.5 3.6l-2.7 2.7 7.1 7.1 2.7-2.7a17.4 17.4 0 0 0 3.6 1.5V52h10v-3.8a17.4 17.4 0 0 0 3.6-1.5l2.7 2.7 7.1-7.1-2.7-2.7a17.4 17.4 0 0 0 1.5-3.6H53V28z"/>
+      </svg>
+      <span class="menu-btn-label">Settings</span>
+    </button>
+
+    <!-- Play -->
+    <button class="menu-btn" id="btn-play">
+      <svg viewBox="0 0 64 64">
+        <polygon points="18,10 54,32 18,54"/>
+      </svg>
+      <span class="menu-btn-label">Play</span>
+    </button>
+
+  </div>
+  <div id="menu-bottom">© 2026 F1 Race Game</div>
+</div>
 
 <script type="importmap">
 {
@@ -270,13 +345,11 @@ buildKerbs(pts, TRACK_W, KERB_W);
 const archGroup = new THREE.Group();
 const archMat  = new THREE.MeshLambertMaterial({ color: 0xffd700 });
 const postMat  = new THREE.MeshLambertMaterial({ color: 0x111111 });
-// posts
 [-10, 10].forEach(x => {
   const post = new THREE.Mesh(new THREE.BoxGeometry(0.5, 8, 0.5), postMat);
   post.position.set(x, 4, 0);
   archGroup.add(post);
 });
-// bar
 const bar = new THREE.Mesh(new THREE.BoxGeometry(22, 1.2, 0.5), archMat);
 bar.position.set(0, 8, 0);
 archGroup.add(bar);
@@ -296,7 +369,6 @@ const checkpoints = CP_T.map(t => {
   return { pos, radius: 9, hit: false, savedPos: pos.clone(), savedHeading: 0 };
 });
 
-// Compute heading at each checkpoint
 CP_T.forEach((t, i) => {
   const tang = curve.getTangent(t);
   checkpoints[i].savedHeading = Math.atan2(tang.x, tang.z);
@@ -311,7 +383,6 @@ checkpoints.forEach(cp => {
   pole.position.copy(cp.pos);
   pole.position.y = 3;
   scene.add(pole);
-  // flag
   const flag = new THREE.Mesh(
     new THREE.BoxGeometry(1.5, 1, 0.05),
     new THREE.MeshLambertMaterial({ color: 0xffdd00 })
@@ -331,31 +402,22 @@ function makeBox(w, h, d, col, x, y, z) {
 }
 
 const carGroup = new THREE.Group();
-// Main body
 carGroup.add(makeBox(2.2, 0.38, 4.4, 0x5a3010, 0, 0.38, 0));
-// Cockpit
 carGroup.add(makeBox(0.9, 0.42, 1.0, 0xfafafa, 0, 0.72, 0.2));
-// Halo (approximated as a thin arc box)
 carGroup.add(makeBox(0.08, 0.55, 0.9, 0x222222, 0, 0.95, 0.2));
-// Nose
 carGroup.add(makeBox(0.7, 0.28, 1.0, 0x3a1e05, 0, 0.32, 2.5));
-// Front wing
 carGroup.add(makeBox(2.8, 0.1, 0.45, 0x222222, 0, 0.16, 2.9));
-// Rear wing (main element)
 carGroup.add(makeBox(2.4, 0.72, 0.16, 0x222222, 0, 0.88, -2.15));
-// Rear wing endplates
 [-1.2, 1.2].forEach(x => carGroup.add(makeBox(0.12, 0.72, 0.5, 0x222222, x, 0.88, -2.15)));
-// Floor
 carGroup.add(makeBox(1.6, 0.08, 3.8, 0x1a0a00, 0, 0.18, 0));
 
-// Wheels (cylinder rotated 90°)
 const wheelMat = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 10 });
 const hubMat   = new THREE.MeshPhongMaterial({ color: 0xcccccc, shininess: 80 });
 const wheelPositions = [
-  [-1.18, 0.35, 1.6],   // FL
-  [ 1.18, 0.35, 1.6],   // FR
-  [-1.18, 0.35,-1.55],  // RL
-  [ 1.18, 0.35,-1.55],  // RR
+  [-1.18, 0.35, 1.6],
+  [ 1.18, 0.35, 1.6],
+  [-1.18, 0.35,-1.55],
+  [ 1.18, 0.35,-1.55],
 ];
 const wheels = [];
 wheelPositions.forEach(([wx, wy, wz]) => {
@@ -376,7 +438,7 @@ scene.add(carGroup);
 
 // ─── Car State ────────────────────────────────────────────────────────────────
 const START_POS     = new THREE.Vector3(0, 0, 3);
-const START_HEADING = 0;  // facing -Z (down the straight)
+const START_HEADING = 0;
 
 const car = {
   pos:     START_POS.clone(),
@@ -395,11 +457,13 @@ let bestLap     = null;
 let cpHits      = 0;
 let lastCpPos   = START_POS.clone();
 let lastCpHead  = START_HEADING;
-let finishArmed = false;  // must hit all CPs before finish counts
+let finishArmed = false;
+let gameActive  = false;
 
 // ─── Input ───────────────────────────────────────────────────────────────────
 const keys = {};
 window.addEventListener('keydown', e => {
+  if (!gameActive) return;
   keys[e.code] = true;
   if (e.code === 'KeyR' || e.code === 'Enter') { e.preventDefault(); resetToLastCP(); }
   if (e.code === 'KeyT' || e.code === 'Backspace') { e.preventDefault(); restartRace(); }
@@ -466,6 +530,10 @@ function flashGo() {
   setTimeout(() => { el.style.display = 'none'; }, 800);
 }
 
+// ─── Menu camera ─────────────────────────────────────────────────────────────
+camera.position.set(-10, 10, 22);
+camera.lookAt(20, 0, -40);
+
 // ─── Game Loop ────────────────────────────────────────────────────────────────
 let prevTime = performance.now();
 
@@ -476,118 +544,121 @@ function loop() {
   const dt  = Math.min((now - prevTime) / 1000, 0.05);
   prevTime  = now;
 
-  // ── Physics ──────────────────────────────────────────────────────────────
-  const up    = keys['ArrowUp']    || keys['KeyW'];
-  const down  = keys['ArrowDown']  || keys['KeyS'];
-  const left  = keys['ArrowLeft']  || keys['KeyA'];
-  const right = keys['ArrowRight'] || keys['KeyD'];
+  if (gameActive) {
+    // ── Physics ────────────────────────────────────────────────────────────
+    const up    = keys['ArrowUp']    || keys['KeyW'];
+    const down  = keys['ArrowDown']  || keys['KeyS'];
+    const left  = keys['ArrowLeft']  || keys['KeyA'];
+    const right = keys['ArrowRight'] || keys['KeyD'];
 
-  // Throttle / brake
-  const throttle = up ? 1 : (down ? -0.6 : 0);
-  if (throttle > 0) {
-    car.speed += throttle * 48 * dt;
-  } else if (throttle < 0) {
-    if (car.speed > 0) {
-      car.speed += throttle * 60 * dt;   // braking forward
-    } else {
-      car.speed += throttle * 18 * dt;   // reversing
+    const throttle = up ? 1 : (down ? -0.6 : 0);
+    if (throttle > 0) {
+      car.speed += throttle * 48 * dt;
+    } else if (throttle < 0) {
+      if (car.speed > 0) {
+        car.speed += throttle * 60 * dt;
+      } else {
+        car.speed += throttle * 18 * dt;
+      }
     }
-  }
 
-  // Drag
-  car.speed *= Math.pow(0.982, dt * 60);
+    car.speed *= Math.pow(0.982, dt * 60);
+    car.speed = Math.max(-12, Math.min(100, car.speed));
 
-  // Clamp speed (max ~360 km/h = 100 m/s)
-  car.speed = Math.max(-12, Math.min(100, car.speed));
-
-  // Start timer on first movement
-  if (Math.abs(car.speed) > 0.5 && lapStart === null) {
-    lapStart = now;
-    flashGo();
-  }
-
-  // Steering (speed-dependent)
-  const steerInput = left ? -1 : (right ? 1 : 0);
-  const maxSteer   = 0.038 * (1.0 - Math.abs(car.speed) / 140);
-  const steerAmt   = steerInput * Math.max(0.008, maxSteer);
-  if (Math.abs(car.speed) > 0.3) {
-    car.heading += steerAmt * Math.sign(car.speed);
-  }
-
-  // Move
-  car.pos.x += Math.sin(car.heading) * car.speed * dt;
-  car.pos.z += Math.cos(car.heading) * car.speed * dt;
-  car.pos.y  = 0;
-
-  // ── Update 3D Car ────────────────────────────────────────────────────────
-  carGroup.position.copy(car.pos);
-  carGroup.rotation.y = car.heading;
-  const wheelSpin = (car.speed / 0.38) * dt;
-  wheels.forEach(w => { w.children[0].rotation.x += wheelSpin; });
-  // Front wheels steer
-  const steerVis = steerInput * 0.38;
-  wheels[0].rotation.y = steerVis;  // FL
-  wheels[1].rotation.y = steerVis;  // FR
-
-  // ── Timer ─────────────────────────────────────────────────────────────────
-  if (lapStart !== null) {
-    elapsed = now - lapStart;
-  }
-
-  // ── Checkpoints ───────────────────────────────────────────────────────────
-  checkpoints.forEach((cp, i) => {
-    if (!cp.hit && car.pos.distanceTo(cp.pos) < cp.radius) {
-      cp.hit = true;
-      cpHits++;
-      lastCpPos.copy(cp.pos);
-      lastCpPos.y = 0;
-      lastCpHead = cp.savedHeading;
-      if (cpHits === 3) finishArmed = true;
+    if (Math.abs(car.speed) > 0.5 && lapStart === null) {
+      lapStart = now;
+      flashGo();
     }
-  });
 
-  // ── Finish line check ─────────────────────────────────────────────────────
-  if (finishArmed && car.pos.distanceTo(new THREE.Vector3(0,0,0)) < 8) {
-    // Complete lap
-    const lapTime = elapsed;
-    if (bestLap === null || lapTime < bestLap) bestLap = lapTime;
-    flashGo();
-    // Reset lap
-    lapStart = now;
-    elapsed  = 0;
-    cpHits   = 0;
-    finishArmed = false;
-    checkpoints.forEach(cp => cp.hit = false);
-    lastCpPos.copy(START_POS);
-    lastCpHead = START_HEADING;
+    const steerInput = left ? -1 : (right ? 1 : 0);
+    const maxSteer   = 0.038 * (1.0 - Math.abs(car.speed) / 140);
+    const steerAmt   = steerInput * Math.max(0.008, maxSteer);
+    if (Math.abs(car.speed) > 0.3) {
+      car.heading += steerAmt * Math.sign(car.speed);
+    }
+
+    car.pos.x += Math.sin(car.heading) * car.speed * dt;
+    car.pos.z += Math.cos(car.heading) * car.speed * dt;
+    car.pos.y  = 0;
+
+    // ── Update 3D Car ──────────────────────────────────────────────────────
+    carGroup.position.copy(car.pos);
+    carGroup.rotation.y = car.heading;
+    const wheelSpin = (car.speed / 0.38) * dt;
+    wheels.forEach(w => { w.children[0].rotation.x += wheelSpin; });
+    const steerVis = steerInput * 0.38;
+    wheels[0].rotation.y = steerVis;
+    wheels[1].rotation.y = steerVis;
+
+    // ── Timer ──────────────────────────────────────────────────────────────
+    if (lapStart !== null) {
+      elapsed = now - lapStart;
+    }
+
+    // ── Checkpoints ────────────────────────────────────────────────────────
+    checkpoints.forEach((cp, i) => {
+      if (!cp.hit && car.pos.distanceTo(cp.pos) < cp.radius) {
+        cp.hit = true;
+        cpHits++;
+        lastCpPos.copy(cp.pos);
+        lastCpPos.y = 0;
+        lastCpHead = cp.savedHeading;
+        if (cpHits === 3) finishArmed = true;
+      }
+    });
+
+    // ── Finish line check ──────────────────────────────────────────────────
+    if (finishArmed && car.pos.distanceTo(new THREE.Vector3(0,0,0)) < 8) {
+      const lapTime = elapsed;
+      if (bestLap === null || lapTime < bestLap) bestLap = lapTime;
+      flashGo();
+      lapStart = now;
+      elapsed  = 0;
+      cpHits   = 0;
+      finishArmed = false;
+      checkpoints.forEach(cp => cp.hit = false);
+      lastCpPos.copy(START_POS);
+      lastCpHead = START_HEADING;
+    }
+
+    // ── Camera ────────────────────────────────────────────────────────────
+    const camDist = 9 + Math.abs(car.speed) * 0.04;
+    const camH    = 3.8;
+    const targetPos = new THREE.Vector3(
+      car.pos.x - Math.sin(car.heading) * camDist,
+      car.pos.y + camH,
+      car.pos.z - Math.cos(car.heading) * camDist
+    );
+    const targetLook = new THREE.Vector3(
+      car.pos.x + Math.sin(car.heading) * 5,
+      car.pos.y + 1.2,
+      car.pos.z + Math.cos(car.heading) * 5
+    );
+    camPos.lerp(targetPos, 0.1);
+    camLook.lerp(targetLook, 0.12);
+    camera.position.copy(camPos);
+    camera.lookAt(camLook);
+
+    // ── HUD ───────────────────────────────────────────────────────────────
+    const speedKmh = car.speed * 3.6;
+    updateHUD(speedKmh, elapsed, bestLap);
   }
-
-  // ── Camera ────────────────────────────────────────────────────────────────
-  const camDist = 9 + Math.abs(car.speed) * 0.04;
-  const camH    = 3.8;
-  const targetPos = new THREE.Vector3(
-    car.pos.x - Math.sin(car.heading) * camDist,
-    car.pos.y + camH,
-    car.pos.z - Math.cos(car.heading) * camDist
-  );
-  const targetLook = new THREE.Vector3(
-    car.pos.x + Math.sin(car.heading) * 5,
-    car.pos.y + 1.2,
-    car.pos.z + Math.cos(car.heading) * 5
-  );
-  camPos.lerp(targetPos, 0.1);
-  camLook.lerp(targetLook, 0.12);
-  camera.position.copy(camPos);
-  camera.lookAt(camLook);
-
-  // ── HUD ───────────────────────────────────────────────────────────────────
-  const speedKmh = car.speed * 3.6;
-  updateHUD(speedKmh, elapsed, bestLap);
 
   renderer.render(scene, camera);
 }
 
 loop();
+
+// ─── Play button ──────────────────────────────────────────────────────────────
+document.getElementById('btn-play').addEventListener('click', () => {
+  gameActive = true;
+  document.getElementById('main-menu').style.display = 'none';
+  document.getElementById('hud').style.display = 'flex';
+  document.getElementById('instructions').style.display = 'block';
+  camPos.copy(camera.position);
+  camLook.set(20, 0, -40);
+  flashGo();
+});
 </script>
 </body>
 </html>
