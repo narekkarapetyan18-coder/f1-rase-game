@@ -461,7 +461,7 @@ checkpoints.forEach(cp => {
   scene.add(flag);
 });
 
-// ─── Supra Car ────────────────────────────────────────────────────────────────
+// ─── Mercedes-AMG GT3 EVO 2020 (Race Car) ────────────────────────────────────
 function makeBox(w, h, d, col, x, y, z, shine = 60) {
   const geo = new THREE.BoxGeometry(w, h, d);
   const mat = new THREE.MeshPhongMaterial({ color: col, shininess: shine });
@@ -471,65 +471,176 @@ function makeBox(w, h, d, col, x, y, z, shine = 60) {
   return mesh;
 }
 
-const YELLOW = 0xc9e000;
-const BLACK  = 0x111111;
-const DARK   = 0x06080f;
+const RSILV = 0xb8bcc4;   // silver race body
+const RBLK  = 0x0a0a0a;   // carbon fibre / aero
+const RDARK = 0x1a1a1a;   // dark trim
+const GLASS = 0x0d1e2c;   // visor / glass
+const RRED  = 0xcc1100;   // AMG red accent
 
 const carGroup = new THREE.Group();
-// Lower chassis
-carGroup.add(makeBox(2.02, 0.30, 4.6,  YELLOW, 0,     0.30,  0,     160));
-// Upper body (widens for fenders)
-carGroup.add(makeBox(2.20, 0.26, 3.6,  YELLOW, 0,     0.56, -0.1,   160));
-// Cabin / greenhouse
-carGroup.add(makeBox(1.30, 0.42, 1.85, DARK,   0,     0.84, -0.22));
-// A-pillar join strip
-carGroup.add(makeBox(1.38, 0.08, 0.22, DARK,   0,     0.68,  0.72));
-// Hood flat
-carGroup.add(makeBox(1.78, 0.09, 1.40, YELLOW, 0,     0.64,  1.10,  160));
-// Hood front slope
-carGroup.add(makeBox(1.84, 0.17, 0.55, YELLOW, 0,     0.54,  1.93,  160));
-// Front bumper
-carGroup.add(makeBox(2.12, 0.26, 0.18, BLACK,  0,     0.34,  2.36));
-// Front splitter
-carGroup.add(makeBox(1.92, 0.07, 0.36, BLACK,  0,     0.12,  2.37));
-// Headlights L / R
-carGroup.add(makeBox(0.52, 0.13, 0.08, 0xeeeeff, -0.66, 0.59, 2.44, 220));
-carGroup.add(makeBox(0.52, 0.13, 0.08, 0xeeeeff,  0.66, 0.59, 2.44, 220));
-// Rear bumper
-carGroup.add(makeBox(2.02, 0.26, 0.18, BLACK,  0,     0.34, -2.34));
-// Rear spoiler base
-carGroup.add(makeBox(1.74, 0.06, 0.28, BLACK,  0,     0.76, -2.12));
-// Rear spoiler blade
-carGroup.add(makeBox(1.74, 0.17, 0.09, YELLOW, 0,     0.86, -2.12, 160));
-// Side sills L / R
-carGroup.add(makeBox(0.13, 0.14, 4.0,  BLACK, -1.08, 0.22,  0));
-carGroup.add(makeBox(0.13, 0.14, 4.0,  BLACK,  1.08, 0.22,  0));
-// Tail-lights L / R
-carGroup.add(makeBox(0.48, 0.14, 0.07, 0xff2200, -0.64, 0.52, -2.42, 120));
-carGroup.add(makeBox(0.48, 0.14, 0.07, 0xff2200,  0.64, 0.52, -2.42, 120));
 
-const tireMat  = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 10 });
-const rimMat   = new THREE.MeshPhongMaterial({ color: 0xbbbbbb, shininess: 220 });
-const lugMat   = new THREE.MeshPhongMaterial({ color: 0x333333, shininess: 60 });
+// ── Flat floor / underbody (GT3 spec flat bottom)
+carGroup.add(makeBox(2.12, 0.10, 4.60, RBLK, 0, 0.08, -0.05));
+
+// ── Main body (wider than road car — GT3 wide body)
+carGroup.add(makeBox(2.08, 0.32, 4.42, RSILV, 0, 0.36, -0.05, 170));
+
+// ── Wide front fender flares
+carGroup.add(makeBox(0.22, 0.36, 1.22, RSILV, -1.09, 0.42, 1.18, 150));
+carGroup.add(makeBox(0.22, 0.36, 1.22, RSILV,  1.09, 0.42, 1.18, 150));
+// ── Wide rear fender flares
+carGroup.add(makeBox(0.26, 0.40, 1.24, RSILV, -1.11, 0.42, -1.12, 150));
+carGroup.add(makeBox(0.26, 0.40, 1.24, RSILV,  1.11, 0.42, -1.12, 150));
+
+// ── Long hood (flat, with central air vent)
+carGroup.add(makeBox(1.96, 0.08, 2.24, RSILV, 0, 0.54, 1.00, 170));
+// ── Hood centre vent (carbon)
+carGroup.add(makeBox(0.28, 0.05, 0.58, RBLK, 0, 0.58, 0.98));
+
+// ── Windshield (angled, racing car)
+{
+  const rise = 0.44, run = 0.52;
+  const len  = Math.sqrt(rise * rise + run * run);
+  const ang  = Math.atan2(rise, run);
+  const ws   = makeBox(1.90, 0.08, len, GLASS, 0, 0.82, -0.34, 10);
+  ws.rotation.x = ang;
+  carGroup.add(ws);
+}
+
+// ── Cabin (very low GT3 roofline)
+carGroup.add(makeBox(1.86, 0.34, 0.56, RSILV, 0, 0.96, -0.90, 170));
+
+// ── Roof
+carGroup.add(makeBox(1.84, 0.07, 0.54, RSILV, 0, 1.15, -0.90, 170));
+
+// ── Fastback rear (steep GT3 style)
+{
+  const rise = 0.52, run = 0.48;
+  const len  = Math.sqrt(rise * rise + run * run);
+  const ang  = -Math.atan2(rise, run);
+  const fb   = makeBox(1.88, 0.08, len, RSILV, 0, 0.87, -1.44, 170);
+  fb.rotation.x = ang;
+  carGroup.add(fb);
+}
+
+// ── Rear body panel
+carGroup.add(makeBox(1.96, 0.44, 0.12, RSILV, 0, 0.32, -1.92, 150));
+
+// ── Front splitter (large carbon, GT3 spec)
+carGroup.add(makeBox(2.24, 0.07, 0.50, RBLK, 0, 0.04, 2.16));
+// Splitter strakes
+[-0.65, 0, 0.65].forEach(function(fx) {
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.10, 0.42),
+    new THREE.MeshPhongMaterial({ color: RBLK }));
+  fin.position.set(fx, 0.10, 2.14); carGroup.add(fin);
+});
+
+// ── Front bumper (aggressive racing bumper)
+carGroup.add(makeBox(2.10, 0.28, 0.22, RSILV, 0, 0.28, 2.18, 150));
+// ── Large front air intakes (no headlights — racing car)
+carGroup.add(makeBox(0.58, 0.18, 0.14, RBLK, -0.55, 0.32, 2.24));
+carGroup.add(makeBox(0.58, 0.18, 0.14, RBLK,  0.55, 0.32, 2.24));
+carGroup.add(makeBox(0.26, 0.14, 0.14, RBLK,  0.00, 0.32, 2.24));
+// ── Racing light strips (LED, no road headlights)
+const rhlMat = new THREE.MeshPhongMaterial({ color: 0xfff8cc, shininess: 400, emissive: 0x886600, emissiveIntensity: 0.7 });
+[-0.72, 0.72].forEach(function(lx) {
+  const rhl = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.05, 0.10), rhlMat);
+  rhl.position.set(lx, 0.50, 2.24); carGroup.add(rhl);
+});
+
+// ── Front dive planes (GT3 aero)
+const divMat = new THREE.MeshPhongMaterial({ color: RBLK, shininess: 50 });
+[-1.06, 1.06].forEach(function(dx) {
+  const d1 = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.06, 0.34), divMat);
+  d1.position.set(dx, 0.34, 2.02); carGroup.add(d1);
+  const d2 = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.06, 0.26), divMat);
+  d2.position.set(dx, 0.42, 2.04); carGroup.add(d2);
+});
+
+// ── Side skirts (carbon, GT3 spec)
+carGroup.add(makeBox(0.10, 0.12, 3.44, RBLK, -1.06, 0.20, -0.10));
+carGroup.add(makeBox(0.10, 0.12, 3.44, RBLK,  1.06, 0.20, -0.10));
+
+// ── Side windows (GT3 style with net/mesh suggestion)
+carGroup.add(makeBox(0.07, 0.28, 0.24, GLASS, -0.93, 0.90, -0.30));
+carGroup.add(makeBox(0.07, 0.28, 0.24, GLASS,  0.93, 0.90, -0.30));
+carGroup.add(makeBox(0.07, 0.30, 0.46, GLASS, -0.93, 0.90, -0.86));
+carGroup.add(makeBox(0.07, 0.30, 0.46, GLASS,  0.93, 0.90, -0.86));
+
+// ── Side mirrors (small racing mirrors)
+const nmirMat = new THREE.MeshPhongMaterial({ color: RDARK, shininess: 80 });
+[-0.95, 0.95].forEach(function(mx) {
+  const sign = mx < 0 ? -1 : 1;
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.04, 0.06), nmirMat);
+  arm.position.set(mx + sign * 0.06, 0.84, 0.48); carGroup.add(arm);
+  const cap = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.22), nmirMat);
+  cap.position.set(mx + sign * 0.13, 0.81, 0.48); carGroup.add(cap);
+});
+
+// ── REAR WING (GT3 specification — large wing on two pylons)
+// Pylons
+carGroup.add(makeBox(0.08, 0.58, 0.12, RBLK, -0.62, 1.48, -1.76));
+carGroup.add(makeBox(0.08, 0.58, 0.12, RBLK,  0.62, 1.48, -1.76));
+// Main wing plane (large, flat, full width)
+carGroup.add(makeBox(2.16, 0.08, 0.68, RBLK, 0, 1.80, -1.74));
+// Gurney flap (rear edge of wing)
+carGroup.add(makeBox(2.16, 0.16, 0.06, RBLK, 0, 1.85, -2.07));
+// Wing endplates
+carGroup.add(makeBox(0.06, 0.26, 0.70, RBLK, -1.08, 1.74, -1.74));
+carGroup.add(makeBox(0.06, 0.26, 0.70, RBLK,  1.08, 1.74, -1.74));
+
+// ── Rear diffuser (large, multi-fin carbon)
+carGroup.add(makeBox(2.00, 0.20, 0.50, RBLK, 0, 0.18, -1.84));
+[-0.62, -0.20, 0.20, 0.62].forEach(function(dfx) {
+  const dfin = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.18, 0.46),
+    new THREE.MeshPhongMaterial({ color: RBLK }));
+  dfin.position.set(dfx, 0.20, -1.84); carGroup.add(dfin);
+});
+
+// ── Rear light strip (red LED, racing car)
+const rrlMat = new THREE.MeshPhongMaterial({ color: 0xff2200, shininess: 200, emissive: 0x880000, emissiveIntensity: 0.6 });
+const rrl = new THREE.Mesh(new THREE.BoxGeometry(1.80, 0.06, 0.10), rrlMat);
+rrl.position.set(0, 0.60, -1.96); carGroup.add(rrl);
+
+// ── Rear bumper
+carGroup.add(makeBox(2.00, 0.22, 0.20, RDARK, 0, 0.18, -1.98));
+
+// ── Wheels — GT3 slick tires with anthracite rims + red centre-lock
+const tireMat    = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 6 });
+const rimDarkMat = new THREE.MeshPhongMaterial({ color: 0x222222, shininess: 110 });
+const spokeMat   = new THREE.MeshPhongMaterial({ color: 0x555555, shininess: 140 });
+const hubMat     = new THREE.MeshPhongMaterial({ color: RRED,     shininess: 200 });
+
 const wheelPositions = [
-  [-1.16, 0.40,  1.58],
-  [ 1.16, 0.40,  1.58],
-  [-1.16, 0.40, -1.58],
-  [ 1.16, 0.40, -1.58],
+  [-1.10, 0.40,  1.36],
+  [ 1.10, 0.40,  1.36],
+  [-1.10, 0.40, -1.28],
+  [ 1.10, 0.40, -1.28],
 ];
 const wheels = [];
-wheelPositions.forEach(([wx, wy, wz]) => {
+wheelPositions.forEach(function([wx, wy, wz]) {
   const wGroup = new THREE.Group();
-  const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.40, 0.40, 0.40, 14), tireMat);
-  tire.rotation.z = Math.PI / 2;
-  tire.castShadow = true;
-  wGroup.add(tire);
-  const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.42, 10), rimMat);
-  rim.rotation.z = Math.PI / 2;
-  wGroup.add(rim);
-  const lug = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.44, 5), lugMat);
-  lug.rotation.z = Math.PI / 2;
-  wGroup.add(lug);
+
+  // Wide slick tire (GT3 spec)
+  const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.40, 0.40, 0.40, 26), tireMat);
+  tire.rotation.z = Math.PI / 2; tire.castShadow = true; wGroup.add(tire);
+
+  // Anthracite rim barrel
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.42, 24), rimDarkMat);
+  barrel.rotation.z = Math.PI / 2; wGroup.add(barrel);
+
+  // 8 spokes
+  for (let s = 0; s < 8; s++) {
+    const angle = (s / 8) * Math.PI * 2;
+    const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.06, 0.05), spokeMat);
+    spoke.rotation.x = angle;
+    wGroup.add(spoke);
+  }
+
+  // Red centre-lock nut (GT3 racing)
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.45, 6), hubMat);
+  hub.rotation.z = Math.PI / 2; wGroup.add(hub);
+
   wGroup.position.set(wx, wy, wz);
   carGroup.add(wGroup);
   wheels.push(wGroup);
