@@ -425,12 +425,60 @@ bar.position.set(0, 8, 0);
 archGroup.add(bar);
 scene.add(archGroup);
 
-// Finish line stripe
-const finLineMat = new THREE.MeshLambertMaterial({ color: 0xffff00 });
-const finLine = new THREE.Mesh(new THREE.PlaneGeometry(TRACK_W * 2, 0.8), finLineMat);
-finLine.rotation.x = -Math.PI / 2;
-finLine.position.set(0, 0.51, 0);
-scene.add(finLine);
+// ─── F1 Starting Grid markings ────────────────────────────────────────────────
+{
+  const gridMat = new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+
+  // Double start/finish line across track width
+  const sfPos = curve.getPoint(0);
+  const sfTan = curve.getTangent(0);
+  const lineRot = Math.atan2(sfTan.x, sfTan.z);
+  [-0.35, 0.35].forEach(off => {
+    const fl = new THREE.Mesh(new THREE.PlaneGeometry(TRACK_W * 2, 0.16), gridMat);
+    fl.rotation.x = -Math.PI / 2;
+    fl.rotation.y = lineRot;
+    fl.position.set(sfPos.x + sfTan.x * off, 0.515, sfPos.z + sfTan.z * off);
+    scene.add(fl);
+  });
+
+  // Grid position boxes — ⊓ shape (front line + two side lines, open at rear)
+  const BOX_W = 2.8, BOX_L = 7.5, LT = 0.13;
+  for (let g = 0; g < 10; g++) {
+    const t    = 1.0 - (g + 1) * 0.009;
+    const cpos = curve.getPoint(t);
+    const ctan = curve.getTangent(t);
+    const perpX = ctan.z, perpZ = -ctan.x;
+    const side  = (g % 2 === 0) ? -1 : 1;
+
+    const bg = new THREE.Group();
+    bg.position.set(
+      cpos.x + perpX * side * 3.5,
+      0.516,
+      cpos.z + perpZ * side * 3.5
+    );
+    bg.rotation.y = Math.atan2(ctan.x, ctan.z);
+
+    // Front line (closed end, direction of travel)
+    const fr = new THREE.Mesh(new THREE.PlaneGeometry(BOX_W, LT), gridMat);
+    fr.rotation.x = -Math.PI / 2;
+    fr.position.set(0, 0, BOX_L / 2);
+    bg.add(fr);
+
+    // Left side line
+    const ls = new THREE.Mesh(new THREE.PlaneGeometry(LT, BOX_L), gridMat);
+    ls.rotation.x = -Math.PI / 2;
+    ls.position.set(-BOX_W / 2, 0, 0);
+    bg.add(ls);
+
+    // Right side line
+    const rs = new THREE.Mesh(new THREE.PlaneGeometry(LT, BOX_L), gridMat);
+    rs.rotation.x = -Math.PI / 2;
+    rs.position.set(BOX_W / 2, 0, 0);
+    bg.add(rs);
+
+    scene.add(bg);
+  }
+}
 
 // ─── Checkpoints (invisible, 3 evenly spaced after start) ─────────────────────
 const CP_T = [0.28, 0.55, 0.78];
