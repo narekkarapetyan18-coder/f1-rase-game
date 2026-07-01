@@ -411,19 +411,69 @@ function buildFence(points, offsetHW) {
 
 buildFence(pts, TRACK_W + KERB_W + 1.6);
 
-// Finish line arch
-const archGroup = new THREE.Group();
-const archMat  = new THREE.MeshLambertMaterial({ color: 0xffd700 });
-const postMat  = new THREE.MeshLambertMaterial({ color: 0x111111 });
-[-10, 10].forEach(x => {
-  const post = new THREE.Mesh(new THREE.BoxGeometry(0.5, 8, 0.5), postMat);
-  post.position.set(x, 4, 0);
-  archGroup.add(post);
-});
-const bar = new THREE.Mesh(new THREE.BoxGeometry(22, 1.2, 0.5), archMat);
-bar.position.set(0, 8, 0);
-archGroup.add(bar);
-scene.add(archGroup);
+// ─── F1 Start/Finish Gantry (spans across track) ─────────────────────────────
+{
+  const sfPos   = curve.getPoint(0);
+  const sfTan   = curve.getTangent(0).normalize();
+  // Perpendicular to track (road-width direction)
+  const sfRight = new THREE.Vector3(sfTan.z, 0, -sfTan.x);
+
+  const SPAN   = TRACK_W + KERB_W + 2.5;  // distance from center to each post
+  const POST_H = 11;
+
+  const archGroup  = new THREE.Group();
+  const darkMat    = new THREE.MeshLambertMaterial({ color: 0x141414 });
+  const greenMat   = new THREE.MeshLambertMaterial({ color: 0x006930 });
+  const whiteMat   = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  const blackMat   = new THREE.MeshLambertMaterial({ color: 0x0a0a0a });
+  const redLtMat   = new THREE.MeshPhongMaterial({ color: 0x550000, shininess: 80 });
+
+  // Two tall posts outside the road on each side
+  [-1, 1].forEach(side => {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.8, POST_H, 0.8), darkMat);
+    post.position.set(
+      sfPos.x + sfRight.x * side * SPAN,
+      POST_H / 2,
+      sfPos.z + sfRight.z * side * SPAN
+    );
+    archGroup.add(post);
+  });
+
+  // Overhead bar running across the track (along sfRight direction)
+  const barLen   = SPAN * 2 + 2.0;
+  const barAngle = Math.atan2(sfTan.z, -sfTan.x);  // rotate bar Z-axis → sfRight
+
+  const mainBar = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.4, barLen), greenMat);
+  mainBar.rotation.y = barAngle;
+  mainBar.position.set(sfPos.x, POST_H, sfPos.z);
+  archGroup.add(mainBar);
+
+  // White sponsor stripe on the front face of the bar (facing approaching cars)
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.30, barLen - 0.4), whiteMat);
+  stripe.rotation.y = barAngle;
+  stripe.position.set(sfPos.x - sfTan.x * 0.31, POST_H + 0.18, sfPos.z - sfTan.z * 0.31);
+  archGroup.add(stripe);
+
+  // Black timing / start-light panel hanging in the center
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(0.32, 2.1, 5.0), blackMat);
+  panel.rotation.y = barAngle;
+  panel.position.set(sfPos.x - sfTan.x * 0.25, POST_H - 1.35, sfPos.z - sfTan.z * 0.25);
+  archGroup.add(panel);
+
+  // 5 red start lights along the panel
+  for (let i = 0; i < 5; i++) {
+    const offset = (i - 2) * 0.9;
+    const lt = new THREE.Mesh(new THREE.SphereGeometry(0.19, 12, 8), redLtMat);
+    lt.position.set(
+      sfPos.x - sfTan.x * 0.42 + sfRight.x * offset,
+      POST_H - 1.35,
+      sfPos.z - sfTan.z * 0.42 + sfRight.z * offset
+    );
+    archGroup.add(lt);
+  }
+
+  scene.add(archGroup);
+}
 
 // ─── F1 Starting Grid markings ────────────────────────────────────────────────
 {
@@ -492,22 +542,6 @@ CP_T.forEach((t, i) => {
   checkpoints[i].savedHeading = Math.atan2(tang.x, tang.z);
 });
 
-// Visual CP markers (thin yellow poles)
-checkpoints.forEach(cp => {
-  const pole = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.15, 0.15, 6, 6),
-    new THREE.MeshLambertMaterial({ color: 0xffdd00 })
-  );
-  pole.position.copy(cp.pos);
-  pole.position.y = 3;
-  scene.add(pole);
-  const flag = new THREE.Mesh(
-    new THREE.BoxGeometry(1.5, 1, 0.05),
-    new THREE.MeshLambertMaterial({ color: 0xffdd00 })
-  );
-  flag.position.set(cp.pos.x + 0.9, cp.pos.y + 5.5, cp.pos.z);
-  scene.add(flag);
-});
 
 // ─── Mercedes-AMG GT3 EVO 2020 (Race Car) ────────────────────────────────────
 function makeBox(w, h, d, col, x, y, z, shine = 60) {
@@ -823,7 +857,7 @@ function loop() {
     }
 
     car.speed *= Math.pow(0.974, dt * 60);
-    car.speed = Math.max(-22, Math.min(140, car.speed));
+    car.speed = Math.max(-22, Math.min(83.3, car.speed));
 
     if (Math.abs(car.speed) > 0.5 && lapStart === null) {
       lapStart = now;
@@ -831,7 +865,7 @@ function loop() {
     }
 
     const steerInput = left ? 1 : (right ? -1 : 0);
-    const maxSteer   = 0.055 * (1.0 - Math.abs(car.speed) / 160);
+    const maxSteer   = 0.055 * (1.0 - Math.abs(car.speed) / 83.3);
     const steerAmt   = steerInput * Math.max(0.014, maxSteer);
     if (Math.abs(car.speed) > 0.3) {
       car.heading += steerAmt * Math.sign(car.speed);
