@@ -542,6 +542,54 @@ CP_T.forEach((t, i) => {
   checkpoints[i].savedHeading = Math.atan2(tang.x, tang.z);
 });
 
+// ─── Checkpoint Gates (visible arches) ───────────────────────────────────────
+const CP_GATE_COLOR   = 0xffcc00;  // yellow = not yet hit
+const CP_HIT_COLOR    = 0x00dd44;  // green  = passed
+const CP_POST_H       = 6.5;
+const CP_SPAN         = TRACK_W + KERB_W + 1.0;
+
+const cpGateMats = [];  // one beam material per checkpoint to tint on hit
+
+CP_T.forEach((t, idx) => {
+  const pos  = curve.getPoint(t);
+  const tang = curve.getTangent(t).normalize();
+  const right = new THREE.Vector3(tang.z, 0, -tang.x);
+  const angle  = Math.atan2(tang.x, tang.z);
+
+  const postMat = new THREE.MeshPhongMaterial({ color: 0xdddddd, shininess: 80 });
+  const beamMat = new THREE.MeshPhongMaterial({ color: CP_GATE_COLOR, shininess: 120, emissive: CP_GATE_COLOR, emissiveIntensity: 0.25 });
+  cpGateMats.push(beamMat);
+
+  const gateGroup = new THREE.Group();
+
+  // Left post
+  const lp = new THREE.Mesh(new THREE.BoxGeometry(0.45, CP_POST_H, 0.45), postMat);
+  lp.position.set(-CP_SPAN, CP_POST_H / 2, 0);
+  lp.castShadow = true;
+  gateGroup.add(lp);
+
+  // Right post
+  const rp = new THREE.Mesh(new THREE.BoxGeometry(0.45, CP_POST_H, 0.45), postMat);
+  rp.position.set( CP_SPAN, CP_POST_H / 2, 0);
+  rp.castShadow = true;
+  gateGroup.add(rp);
+
+  // Top beam
+  const beam = new THREE.Mesh(new THREE.BoxGeometry(CP_SPAN * 2, 0.55, 0.55), beamMat);
+  beam.position.set(0, CP_POST_H, 0);
+  gateGroup.add(beam);
+
+  // Hanging number panel
+  const panMat = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 40 });
+  const panel  = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 0.12), panMat);
+  panel.position.set(0, CP_POST_H - 0.8, 0);
+  gateGroup.add(panel);
+
+  gateGroup.position.set(pos.x, 0.5, pos.z);
+  gateGroup.rotation.y = angle;
+  scene.add(gateGroup);
+  checkpoints[idx].gateGroup = gateGroup;
+});
 
 // ─── Mercedes-AMG GT3 EVO 2020 (Race Car) ────────────────────────────────────
 function makeBox(w, h, d, col, x, y, z, shine = 60) {
@@ -791,6 +839,7 @@ function restartRace() {
   lastCpPos.copy(START_POS);
   lastCpHead = START_HEADING;
   checkpoints.forEach(cp => cp.hit = false);
+  cpGateMats.forEach(m => { m.color.setHex(CP_GATE_COLOR); m.emissive.setHex(CP_GATE_COLOR); });
   updateHUD(0, 0, null);
 }
 
@@ -918,6 +967,9 @@ function loop() {
         lastCpPos.y = 0;
         lastCpHead = cp.savedHeading;
         if (cpHits === 3) finishArmed = true;
+        // Turn gate green
+        cpGateMats[i].color.setHex(CP_HIT_COLOR);
+        cpGateMats[i].emissive.setHex(CP_HIT_COLOR);
       }
     });
 
@@ -931,6 +983,7 @@ function loop() {
       cpHits   = 0;
       finishArmed = false;
       checkpoints.forEach(cp => cp.hit = false);
+      cpGateMats.forEach(m => { m.color.setHex(CP_GATE_COLOR); m.emissive.setHex(CP_GATE_COLOR); });
       lastCpPos.copy(START_POS);
       lastCpHead = START_HEADING;
     }
