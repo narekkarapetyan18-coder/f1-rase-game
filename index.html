@@ -531,6 +531,192 @@ buildFence(pts, TRACK_W + KERB_W + 1.6);
   }
 }
 
+// ─── Gaming Desk (trackside, near start line) ─────────────────────────────────
+{
+  const sfPos   = curve.getPoint(0);
+  const sfTan   = curve.getTangent(0).normalize();
+  const sfRight = new THREE.Vector3(sfTan.z, 0, -sfTan.x);
+
+  const desk      = new THREE.Group();
+  const deskBlack = new THREE.MeshPhongMaterial({ color: 0x0c0c0c, shininess: 60 });
+  const frameMat  = new THREE.MeshPhongMaterial({ color: 0x222222, shininess: 90 });
+
+  function deskBox(w, h, d, mat, x, y, z) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    desk.add(m);
+    return m;
+  }
+
+  // Tabletop
+  const TOP_Y = 1.05;
+  deskBox(3.2, 0.09, 1.4, deskBlack, 0, TOP_Y, 0);
+
+  // Z-shaped side legs (top runner + slanted strut + floor runner)
+  [-1.35, 1.35].forEach(x => {
+    deskBox(0.12, 0.10, 1.20, frameMat, x, TOP_Y - 0.10, 0);
+    const diag = deskBox(0.12, 1.10, 0.14, frameMat, x, TOP_Y / 2, 0.02);
+    diag.rotation.x = 0.35;
+    deskBox(0.12, 0.08, 1.30, frameMat, x, 0.04, 0);
+  });
+
+  // Racing-game screen texture (shared by both monitors)
+  const cv = document.createElement('canvas');
+  cv.width = 256; cv.height = 128;
+  const cx = cv.getContext('2d');
+  const grad = cx.createLinearGradient(0, 0, 256, 128);
+  grad.addColorStop(0, '#3a0610');
+  grad.addColorStop(0.5, '#c22007');
+  grad.addColorStop(1, '#ffa41b');
+  cx.fillStyle = grad;
+  cx.fillRect(0, 0, 256, 128);
+  cx.strokeStyle = 'rgba(255,255,255,0.5)';
+  cx.lineWidth = 3;
+  for (let i = 0; i < 9; i++) {
+    cx.beginPath();
+    cx.moveTo(0, 32 + i * 13);
+    cx.lineTo(256, 2 + i * 13);
+    cx.stroke();
+  }
+  cx.fillStyle = '#ffd400';
+  cx.fillRect(95, 66, 70, 22);
+  cx.fillRect(112, 54, 34, 14);
+  cx.fillStyle = '#111';
+  cx.fillRect(98, 86, 16, 10);
+  cx.fillRect(146, 86, 16, 10);
+  const screenMat = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv) });
+
+  // Dual monitors, angled toward each other
+  [-1, 1].forEach(s => {
+    const mon = new THREE.Group();
+    const bezel = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.68, 0.05), deskBlack);
+    bezel.castShadow = true;
+    mon.add(bezel);
+    const scr = new THREE.Mesh(new THREE.PlaneGeometry(1.06, 0.60), screenMat);
+    scr.position.z = 0.028;
+    mon.add(scr);
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.42, 0.08), frameMat);
+    arm.position.set(0, -0.50, -0.06);
+    mon.add(arm);
+    const base = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.04, 0.30), frameMat);
+    base.position.set(0, -0.72, -0.06);
+    mon.add(base);
+    mon.position.set(s * 0.54, TOP_Y + 0.79, -0.42);
+    mon.rotation.y = -s * 0.28;
+    desk.add(mon);
+  });
+
+  // Keyboard with red backlight glow
+  const kbMat = new THREE.MeshPhongMaterial({ color: 0x1a1a1a, emissive: 0x660000, emissiveIntensity: 0.9, shininess: 30 });
+  const kb = deskBox(0.85, 0.05, 0.30, kbMat, -0.10, TOP_Y + 0.07, 0.25);
+  kb.rotation.y = 0.06;
+
+  // Mouse
+  deskBox(0.13, 0.06, 0.22, deskBlack, 0.62, TOP_Y + 0.07, 0.22);
+
+  // Gamepad
+  const gp = deskBox(0.30, 0.07, 0.20, deskBlack, -0.95, TOP_Y + 0.08, 0.30);
+  gp.rotation.y = -0.4;
+
+  // Cup holder ring with a red can, hanging off the front-left edge
+  const cupRing = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.02, 8, 20), frameMat);
+  cupRing.rotation.x = Math.PI / 2;
+  cupRing.position.set(-1.0, TOP_Y - 0.08, 0.62);
+  desk.add(cupRing);
+  const can = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.28, 16),
+    new THREE.MeshPhongMaterial({ color: 0xcc1111, shininess: 120 }));
+  can.position.set(-1.0, TOP_Y - 0.02, 0.62);
+  can.castShadow = true;
+  desk.add(can);
+
+  // Headset hanging on a hook on the right side
+  deskBox(0.05, 0.05, 0.25, frameMat, 1.62, TOP_Y - 0.08, 0.30);
+  const band = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.025, 8, 20, Math.PI), deskBlack);
+  band.position.set(1.62, TOP_Y - 0.22, 0.38);
+  desk.add(band);
+  [-0.13, 0.13].forEach(dx => {
+    const earCup = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.05, 12), deskBlack);
+    earCup.rotation.z = Math.PI / 2;
+    earCup.position.set(1.62 + dx, TOP_Y - 0.25, 0.38);
+    desk.add(earCup);
+  });
+
+  // PC tower on the ground, right of the desk, with glowing red fans
+  const tower = new THREE.Group();
+  const towerBody = new THREE.Mesh(new THREE.BoxGeometry(0.55, 1.15, 1.0), deskBlack);
+  towerBody.position.y = 0.58;
+  towerBody.castShadow = true;
+  tower.add(towerBody);
+  const fanMat = new THREE.MeshPhongMaterial({ color: 0xff2222, emissive: 0xcc0000, emissiveIntensity: 0.9 });
+  [0.90, 0.58, 0.26].forEach(fy => {
+    const fan = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.03, 16), fanMat);
+    fan.rotation.x = Math.PI / 2;
+    fan.position.set(0, fy, 0.51);
+    tower.add(fan);
+  });
+  tower.position.set(2.05, 0, 0.05);
+  desk.add(tower);
+
+  // ── Human Fall Flat guy sitting at the desk ──
+  const rig = new THREE.Group();          // chair + human, facing the monitors
+  rig.position.set(0, 0, 1.15);
+  rig.rotation.y = Math.PI;
+  desk.add(rig);
+
+  function rigAdd(mesh, x, y, z) {
+    mesh.position.set(x, y, z);
+    mesh.castShadow = true;
+    rig.add(mesh);
+    return mesh;
+  }
+
+  // Gaming chair
+  const chairMat = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 50 });
+  const chairRed = new THREE.MeshPhongMaterial({ color: 0xbb1111, shininess: 50 });
+  rigAdd(new THREE.Mesh(new THREE.CylinderGeometry(0.30, 0.34, 0.05, 16), chairMat), 0, 0.03, 0);
+  rigAdd(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.45, 10), chairMat), 0, 0.27, 0);
+  rigAdd(new THREE.Mesh(new THREE.BoxGeometry(0.60, 0.09, 0.55), chairMat), 0, 0.52, 0);
+  const backrest = rigAdd(new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.78, 0.09), chairMat), 0, 0.95, -0.31);
+  backrest.rotation.x = -0.10;
+  const headPad = rigAdd(new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.13, 0.07), chairRed), 0, 1.28, -0.36);
+  headPad.rotation.x = -0.10;
+
+  // The human: all-white, faceless, chubby (Human Fall Flat style)
+  const skinMat = new THREE.MeshPhongMaterial({ color: 0xf0f0f0, shininess: 15 });
+
+  // Torso (chubby capsule, slight lean toward the desk)
+  const torso = rigAdd(new THREE.Mesh(new THREE.CapsuleGeometry(0.21, 0.33, 6, 14), skinMat), 0, 0.96, 0.02);
+  torso.scale.x = 1.15;
+  torso.rotation.x = 0.12;
+
+  // Head (rounded, no face) + little dome crest on top
+  const head = rigAdd(new THREE.Mesh(new THREE.SphereGeometry(0.175, 18, 14), skinMat), 0, 1.43, 0.06);
+  head.scale.set(1, 1.12, 1.05);
+  rigAdd(new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 10), skinMat), 0, 1.60, 0.04);
+
+  // Arms reaching forward onto the desk, hands by the keyboard
+  [-0.27, 0.27].forEach(ax => {
+    const arm = rigAdd(new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.42, 6, 10), skinMat), ax, 1.13, 0.26);
+    arm.rotation.x = 1.15;
+    rigAdd(new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), skinMat), ax * 0.9, 1.09, 0.48);
+  });
+
+  // Thighs forward, shins down, feet on the grass
+  [-0.13, 0.13].forEach(lx => {
+    const thigh = rigAdd(new THREE.Mesh(new THREE.CapsuleGeometry(0.095, 0.28, 6, 10), skinMat), lx, 0.64, 0.20);
+    thigh.rotation.x = Math.PI / 2;
+    rigAdd(new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.26, 6, 10), skinMat), lx, 0.26, 0.38);
+    rigAdd(new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.09, 0.24), skinMat), lx, 0.05, 0.44);
+  });
+
+  // Drop it on the grass just outside the fence at the start line, facing the track
+  const DESK_OFF = 15;
+  desk.position.set(sfPos.x - sfRight.x * DESK_OFF, 0, sfPos.z - sfRight.z * DESK_OFF);
+  desk.rotation.y = Math.atan2(sfRight.x, sfRight.z);
+  scene.add(desk);
+}
+
 // ─── Checkpoints (invisible, 3 evenly spaced after start) ─────────────────────
 const CP_T = [0.28, 0.55, 0.78];
 const checkpoints = CP_T.map(t => {
@@ -780,8 +966,16 @@ wheelPositions.forEach(function([wx, wy, wz]) {
 scene.add(carGroup);
 
 // ─── Car State ────────────────────────────────────────────────────────────────
-const START_POS     = new THREE.Vector3(0, 0, 3);
-const START_HEADING = 0;
+// Spawn in the pole-position grid box (first ⊓ marking behind the start line)
+const START_T   = 1.0 - 0.009;
+const startCPos = curve.getPoint(START_T);
+const startCTan = curve.getTangent(START_T).normalize();
+const START_POS = new THREE.Vector3(
+  startCPos.x + startCTan.z * -3.5,
+  0,
+  startCPos.z - startCTan.x * -3.5
+);
+const START_HEADING = Math.atan2(startCTan.x, startCTan.z);
 
 const car = {
   pos:     START_POS.clone(),
@@ -789,6 +983,9 @@ const car = {
   speed:   0,
   vel:     new THREE.Vector3(),
 };
+car.pos.y = 0.5;
+carGroup.position.copy(car.pos);
+carGroup.rotation.y = car.heading;
 
 const camPos  = new THREE.Vector3(0, 5, 12);
 const camLook = new THREE.Vector3(0, 1, 0);
