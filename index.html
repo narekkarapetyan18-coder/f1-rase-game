@@ -412,6 +412,7 @@ function buildFence(points, offsetHW) {
 buildFence(pts, TRACK_W + KERB_W + 1.6);
 
 // ─── F1 Start/Finish Gantry (spans across track) ─────────────────────────────
+const startLightMats = [];   // 5 start-light materials, driven by runStartLights()
 {
   const sfPos   = curve.getPoint(0);
   const sfTan   = curve.getTangent(0).normalize();
@@ -426,7 +427,6 @@ buildFence(pts, TRACK_W + KERB_W + 1.6);
   const greenMat   = new THREE.MeshLambertMaterial({ color: 0x006930 });
   const whiteMat   = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const blackMat   = new THREE.MeshLambertMaterial({ color: 0x0a0a0a });
-  const redLtMat   = new THREE.MeshPhongMaterial({ color: 0x550000, shininess: 80 });
 
   // Two tall posts outside the road on each side
   [-1, 1].forEach(side => {
@@ -460,10 +460,12 @@ buildFence(pts, TRACK_W + KERB_W + 1.6);
   panel.position.set(sfPos.x - sfTan.x * 0.25, POST_H - 1.35, sfPos.z - sfTan.z * 0.25);
   archGroup.add(panel);
 
-  // 5 red start lights along the panel
+  // 5 red start lights along the panel (one material each so they can light up individually)
   for (let i = 0; i < 5; i++) {
     const offset = (i - 2) * 0.9;
-    const lt = new THREE.Mesh(new THREE.SphereGeometry(0.19, 12, 8), redLtMat);
+    const ltMat = new THREE.MeshPhongMaterial({ color: 0x550000, shininess: 80 });
+    startLightMats.push(ltMat);
+    const lt = new THREE.Mesh(new THREE.SphereGeometry(0.19, 12, 8), ltMat);
     lt.position.set(
       sfPos.x - sfTan.x * 0.42 + sfRight.x * offset,
       POST_H - 1.35,
@@ -1039,6 +1041,7 @@ function restartRace() {
   checkpoints.forEach(cp => cp.hit = false);
   cpGateMats.forEach(m => { m.color.setHex(CP_GATE_COLOR); m.emissive.setHex(CP_GATE_COLOR); });
   updateHUD(0, 0, null);
+  runStartLights(flashGo);
 }
 
 // ─── HUD update ──────────────────────────────────────────────────────────────
@@ -1064,6 +1067,33 @@ function updateHUD(speedKmh, elapsedMs, bestMs) {
   }
 }
 
+// ─── F1 start-light sequence ─────────────────────────────────────────────────
+let controlsLocked = false;
+let lightSeqTimers = [];
+
+function setStartLight(i, on) {
+  const m = startLightMats[i];
+  if (on) { m.color.setHex(0xff1111); m.emissive.setHex(0xcc0000); }
+  else    { m.color.setHex(0x550000); m.emissive.setHex(0x000000); }
+}
+
+function runStartLights(done) {
+  lightSeqTimers.forEach(clearTimeout);
+  lightSeqTimers = [];
+  controlsLocked = true;
+  for (let i = 0; i < 5; i++) setStartLight(i, false);
+  // Lights come on one by one...
+  for (let i = 0; i < 5; i++) {
+    lightSeqTimers.push(setTimeout(() => setStartLight(i, true), 700 + i * 700));
+  }
+  // ...then all out — GO!
+  lightSeqTimers.push(setTimeout(() => {
+    for (let i = 0; i < 5; i++) setStartLight(i, false);
+    controlsLocked = false;
+    if (done) done();
+  }, 700 + 5 * 700 + 600));
+}
+
 // ─── GO! flash ────────────────────────────────────────────────────────────────
 function flashGo() {
   const el = document.getElementById('go-msg');
@@ -1087,10 +1117,10 @@ function loop() {
 
   if (gameActive) {
     // ── Physics ────────────────────────────────────────────────────────────
-    const up    = keys['ArrowUp']    || keys['KeyW'];
-    const down  = keys['ArrowDown']  || keys['KeyS'];
-    const left  = keys['ArrowLeft']  || keys['KeyA'];
-    const right = keys['ArrowRight'] || keys['KeyD'];
+    const up    = !controlsLocked && (keys['ArrowUp']    || keys['KeyW']);
+    const down  = !controlsLocked && (keys['ArrowDown']  || keys['KeyS']);
+    const left  = !controlsLocked && (keys['ArrowLeft']  || keys['KeyA']);
+    const right = !controlsLocked && (keys['ArrowRight'] || keys['KeyD']);
 
     const throttle = up ? 1 : (down ? -0.6 : 0);
     if (throttle > 0) {
@@ -1222,7 +1252,7 @@ document.getElementById('btn-play').addEventListener('click', () => {
   document.getElementById('instructions').style.display = 'block';
   camPos.copy(camera.position);
   camLook.set(20, 0, -40);
-  flashGo();
+  runStartLights(flashGo);
 });
 </script>
 </body>
