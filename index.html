@@ -485,6 +485,7 @@ buildFence(pts, TRACK_W + KERB_W + 1.6);
   const lineRot = Math.atan2(sfTan.x, sfTan.z);
   [-0.35, 0.35].forEach(off => {
     const fl = new THREE.Mesh(new THREE.PlaneGeometry(TRACK_W * 2, 0.16), gridMat);
+    fl.rotation.order = 'YXZ';
     fl.rotation.x = -Math.PI / 2;
     fl.rotation.y = lineRot;
     fl.position.set(sfPos.x + sfTan.x * off, 0.515, sfPos.z + sfTan.z * off);
