@@ -116,19 +116,46 @@ canvas { display:block; }
 #paint-swatches { display:flex; gap:8px; }
 .swatch { width:26px; height:26px; border-radius:4px; cursor:pointer; border:2px solid transparent; }
 .swatch.sel { border-color:#ffdd00; }
-#btn-garage-back {
+#btn-garage-back, #btn-settings-back {
   margin-top:8px; width:100%; height:42px; border:none; border-radius:4px;
   background:rgba(36,56,118,0.98); color:#fff; font-family:'Courier New',monospace;
   font-size:14px; letter-spacing:2px; font-weight:bold; cursor:pointer; text-transform:uppercase;
 }
-#btn-garage-back:hover { background:#3a55b0; }
+#btn-garage-back:hover, #btn-settings-back:hover { background:#3a55b0; }
+
+/* ─── Settings ─────────────────────────────────────────────────────────────── */
+#settings-menu {
+  position:absolute; top:0; left:0; right:0; bottom:0;
+  display:none; z-index:100; user-select:none;
+  background:linear-gradient(175deg,rgba(12,20,52,0.82) 0%,rgba(8,14,38,0.76) 100%);
+}
+#settings-panel {
+  position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+  width:400px; background:rgba(16,30,76,0.92); border-radius:6px;
+  padding:26px 28px; color:#fff;
+}
+#settings-title {
+  font-family:Arial,sans-serif; font-size:30px; font-weight:900; font-style:italic;
+  color:#c8d8f8; letter-spacing:3px; margin-bottom:22px;
+  text-shadow:0 0 14px rgba(150,185,255,0.5);
+}
+.set-row { display:flex; align-items:center; margin-bottom:18px; gap:12px; }
+.set-row .tune-label { width:112px; }
+.set-row input[type=range] { flex:1; accent-color:#ffdd00; cursor:pointer; }
+.set-toggle {
+  height:30px; padding:0 18px; border:none; border-radius:4px;
+  background:#24387a; color:#fff; font-family:'Courier New',monospace;
+  font-size:13px; letter-spacing:1px; font-weight:bold; cursor:pointer;
+}
+.set-toggle:hover { background:#3a55b0; }
+.set-toggle.off { color:#8aaddd; }
 </style>
 </head>
 <body>
 
 <div id="instructions">
   <span><kbd>W</kbd> / <kbd>↑</kbd> Accelerate &nbsp; <kbd>S</kbd> / <kbd>↓</kbd> Brake &nbsp; <kbd>A</kbd><kbd>D</kbd> / <kbd>←</kbd><kbd>→</kbd> Steer</span><br>
-  <span><kbd>R</kbd> / <kbd>Enter</kbd> Return to last checkpoint &nbsp;&nbsp; <kbd>T</kbd> / <kbd>Backspace</kbd> Start over</span>
+  <span><kbd>R</kbd> / <kbd>Enter</kbd> Return to last checkpoint &nbsp;&nbsp; <kbd>T</kbd> / <kbd>Backspace</kbd> Start over &nbsp;&nbsp; <kbd>M</kbd> Mute</span>
 </div>
 
 <div id="hud">
@@ -228,6 +255,32 @@ canvas { display:block; }
       <span class="tune-val" id="val-handling"></span>
     </div>
     <button id="btn-garage-back">Back</button>
+  </div>
+</div>
+
+<!-- ─── Settings ───────────────────────────────────────────────────────────── -->
+<div id="settings-menu">
+  <div id="settings-panel">
+    <div id="settings-title">SETTINGS</div>
+    <div class="set-row">
+      <span class="tune-label">Game Music</span>
+      <input type="range" id="set-music" min="0" max="100" step="5">
+      <span class="tune-val" id="val-set-music"></span>
+    </div>
+    <div class="set-row">
+      <span class="tune-label">Car Sound</span>
+      <input type="range" id="set-sfx" min="0" max="100" step="5">
+      <span class="tune-val" id="val-set-sfx"></span>
+    </div>
+    <div class="set-row">
+      <span class="tune-label">Shadows</span>
+      <button class="set-toggle" id="set-shadows">ON</button>
+    </div>
+    <div class="set-row">
+      <span class="tune-label">Best Lap</span>
+      <button class="set-toggle" id="set-reset-record">Reset Record</button>
+    </div>
+    <button id="btn-settings-back">Back</button>
   </div>
 </div>
 
@@ -1257,6 +1310,248 @@ applyTuning();
 setPaint(paintHex);
 refreshGarageUI();
 
+// ─── Audio: engine sound + driving music (Web Audio, no files) ───────────────
+let audioCtx = null, masterGain = null, musicGain = null;
+let engOscA = null, engOscB = null, engOscC = null;
+let engNoiseFilter = null, engNoiseGain = null;
+let pulseOsc = null, pulseGain = null;
+let engineFilter = null, engineGain = null;
+let engLastGear = 0;
+let muted = false;
+
+function midiFreq(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+
+function initAudio() {
+  if (audioCtx) { audioCtx.resume(); return; }
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = muted ? 0 : 1;
+  masterGain.connect(audioCtx.destination);
+
+  // Engine: layered harmonics + sub + engine noise, driven through a soft-clip
+  // distortion (growl) and a lowpass that opens with the revs
+  engineGain = audioCtx.createGain();
+  engineGain.gain.value = 0;
+
+  const engMix = audioCtx.createGain();
+  engMix.gain.value = 0.55;
+
+  const shaper = audioCtx.createWaveShaper();
+  const curve = new Float32Array(1024);
+  for (let i = 0; i < 1024; i++) {
+    const x = (i / 511.5) - 1;
+    curve[i] = Math.tanh(2.8 * x);
+  }
+  shaper.curve = curve;
+  shaper.oversample = '2x';
+
+  engineFilter = audioCtx.createBiquadFilter();
+  engineFilter.type = 'lowpass';
+  engineFilter.frequency.value = 400;
+  engineFilter.Q.value = 1.1;
+
+  // Three detuned saws: fundamental, sub-octave (big V8 body), 2nd harmonic (scream)
+  function engOsc(mult, detune, vol) {
+    const o = audioCtx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.value = 70 * mult;
+    o.detune.value = detune;
+    const g = audioCtx.createGain();
+    g.gain.value = vol;
+    o.connect(g);
+    g.connect(engMix);
+    o.start();
+    return o;
+  }
+  engOscA = engOsc(1.0,   0, 0.50);
+  engOscB = engOsc(0.5,  +9, 0.60);
+  engOscC = engOsc(2.0,  -7, 0.22);
+
+  // Intake / exhaust noise: looped white noise through a bandpass that tracks revs
+  const noiseBuf2 = audioCtx.createBuffer(1, audioCtx.sampleRate, audioCtx.sampleRate);
+  const nd = noiseBuf2.getChannelData(0);
+  for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+  const noiseSrc = audioCtx.createBufferSource();
+  noiseSrc.buffer = noiseBuf2;
+  noiseSrc.loop = true;
+  engNoiseFilter = audioCtx.createBiquadFilter();
+  engNoiseFilter.type = 'bandpass';
+  engNoiseFilter.frequency.value = 500;
+  engNoiseFilter.Q.value = 0.6;
+  engNoiseGain = audioCtx.createGain();
+  engNoiseGain.gain.value = 0.05;
+  noiseSrc.connect(engNoiseFilter);
+  engNoiseFilter.connect(engNoiseGain);
+  engNoiseGain.connect(engMix);
+  noiseSrc.start();
+
+  engMix.connect(shaper);
+  shaper.connect(engineFilter);
+  engineFilter.connect(engineGain);
+  engineGain.connect(masterGain);
+
+  // Cylinder-firing pulse: modulates the volume so it chugs at idle,
+  // smooths out into a scream at high RPM
+  pulseOsc = audioCtx.createOscillator();
+  pulseOsc.type = 'square';
+  pulseOsc.frequency.value = 35;
+  pulseGain = audioCtx.createGain();
+  pulseGain.gain.value = 0.03;
+  pulseOsc.connect(pulseGain);
+  pulseGain.connect(engineGain.gain);
+  pulseOsc.start();
+
+  startMusic();
+}
+
+// ── Driving music: 4-bar synth loop (Am–F–G–Em), bass + lead + kick + hats ──
+function startMusic() {
+  musicGain = audioCtx.createGain();
+  musicGain.gain.value = 0.9 * (SETTINGS.music / 100);
+  musicGain.connect(masterGain);
+
+  const BASS = [
+    45,45,45,45,45,45,45,45,  41,41,41,41,41,41,41,41,
+    43,43,43,43,43,43,43,43,  40,40,40,40,40,40,40,40,
+  ];
+  const LEAD = [
+    69, 0, 0,72, 74, 0,72, 0,  72, 0,69, 0, 65, 0,69, 0,
+    71, 0, 0,74, 76, 0,74, 0,  71, 0,67, 0, 64, 0,67,71,
+  ];
+
+  function playNote(freq, t, dur, type, vol) {
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = type;
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g);
+    g.connect(musicGain);
+    o.start(t);
+    o.stop(t + dur + 0.02);
+  }
+
+  function playKick(t) {
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(120, t);
+    o.frequency.exponentialRampToValueAtTime(45, t + 0.1);
+    g.gain.setValueAtTime(0.28, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
+    o.connect(g);
+    g.connect(musicGain);
+    o.start(t);
+    o.stop(t + 0.16);
+  }
+
+  let noiseBuf = null;
+  function playHat(t) {
+    if (!noiseBuf) {
+      noiseBuf = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * 0.05), audioCtx.sampleRate);
+      const d = noiseBuf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const src = audioCtx.createBufferSource();
+    src.buffer = noiseBuf;
+    const f = audioCtx.createBiquadFilter();
+    f.type = 'highpass';
+    f.frequency.value = 6000;
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.07, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+    src.connect(f);
+    f.connect(g);
+    g.connect(musicGain);
+    src.start(t);
+  }
+
+  const STEP = (60 / 132) / 2;   // 8th notes at 132 bpm
+  let nextT = audioCtx.currentTime + 0.1;
+  let step  = 0;
+  setInterval(() => {
+    while (nextT < audioCtx.currentTime + 0.35) {
+      const b = BASS[step];
+      playNote(midiFreq(step % 2 ? b + 12 : b), nextT, STEP * 0.9, 'triangle', 0.10);
+      if (LEAD[step]) playNote(midiFreq(LEAD[step]), nextT, STEP * 1.6, 'square', 0.05);
+      if (step % 4 === 0) playKick(nextT);
+      if (step % 2 === 1) playHat(nextT);
+      step  = (step + 1) % 32;
+      nextT += STEP;
+    }
+  }, 100);
+}
+
+// M key mutes / unmutes everything
+window.addEventListener('keydown', e => {
+  if (e.code === 'KeyM' && audioCtx) {
+    muted = !muted;
+    masterGain.gain.setTargetAtTime(muted ? 0 : 1, audioCtx.currentTime, 0.02);
+  }
+});
+
+// ─── Settings ────────────────────────────────────────────────────────────────
+const SETTINGS = { music: 80, sfx: 90, shadows: true };
+try {
+  const savedSet = JSON.parse(localStorage.getItem('f1_settings'));
+  if (savedSet) {
+    if (savedSet.music >= 0 && savedSet.music <= 100) SETTINGS.music = savedSet.music;
+    if (savedSet.sfx   >= 0 && savedSet.sfx   <= 100) SETTINGS.sfx   = savedSet.sfx;
+    if (typeof savedSet.shadows === 'boolean') SETTINGS.shadows = savedSet.shadows;
+  }
+} catch (e) {}
+
+function saveSettings() {
+  try { localStorage.setItem('f1_settings', JSON.stringify(SETTINGS)); } catch (e) {}
+}
+
+function applyMusicVolume() {
+  if (musicGain) musicGain.gain.value = 0.9 * (SETTINGS.music / 100);
+}
+
+function applyShadows() {
+  renderer.shadowMap.enabled = SETTINGS.shadows;
+  sun.castShadow = SETTINGS.shadows;
+  scene.traverse(o => { if (o.isMesh && o.material) o.material.needsUpdate = true; });
+}
+
+function refreshSettingsUI() {
+  document.getElementById('set-music').value = SETTINGS.music;
+  document.getElementById('set-sfx').value   = SETTINGS.sfx;
+  document.getElementById('val-set-music').textContent = SETTINGS.music + '%';
+  document.getElementById('val-set-sfx').textContent   = SETTINGS.sfx + '%';
+  const sb = document.getElementById('set-shadows');
+  sb.textContent = SETTINGS.shadows ? 'ON' : 'OFF';
+  sb.classList.toggle('off', !SETTINGS.shadows);
+}
+
+document.getElementById('set-music').addEventListener('input', e => {
+  SETTINGS.music = Number(e.target.value);
+  applyMusicVolume();
+  refreshSettingsUI();
+  saveSettings();
+});
+document.getElementById('set-sfx').addEventListener('input', e => {
+  SETTINGS.sfx = Number(e.target.value);
+  refreshSettingsUI();
+  saveSettings();
+});
+document.getElementById('set-shadows').addEventListener('click', () => {
+  SETTINGS.shadows = !SETTINGS.shadows;
+  applyShadows();
+  refreshSettingsUI();
+  saveSettings();
+});
+document.getElementById('set-reset-record').addEventListener('click', () => {
+  bestLap = null;
+  updateHUD(0, 0, null);
+});
+
+if (!SETTINGS.shadows) applyShadows();
+refreshSettingsUI();
+
 // ─── Menu camera ─────────────────────────────────────────────────────────────
 camera.position.set(-10, 10, 22);
 camera.lookAt(20, 0, -40);
@@ -1390,6 +1685,41 @@ function loop() {
     camera.position.copy(camPos);
     camera.lookAt(camLook);
 
+    // ── Engine sound (pitch follows speed, 5 fake gears) ──────────────────
+    if (audioCtx) {
+      const sp      = Math.abs(car.speed);
+      const gearLen = tuning.topSpeed / 5;
+      const gear    = Math.min(4, Math.floor(sp / gearLen));
+      const rpm     = Math.min(1, (sp - gear * gearLen) / gearLen);
+      const tNow    = audioCtx.currentTime;
+
+      // Wide, racy rev range: ~70 Hz idle up to ~400+ Hz screaming
+      const freq = 70 + rpm * 260 + gear * 18;
+      engOscA.frequency.setTargetAtTime(freq, tNow, 0.02);
+      engOscB.frequency.setTargetAtTime(freq * 0.5, tNow, 0.02);
+      engOscC.frequency.setTargetAtTime(freq * 1.99, tNow, 0.02);
+
+      // Noise follows the revs; extra hiss on throttle, burble on overrun
+      engNoiseFilter.frequency.setTargetAtTime(Math.min(7500, freq * 6), tNow, 0.05);
+      engNoiseGain.gain.setTargetAtTime(0.04 + rpm * 0.10 + (up ? 0.05 : rpm * 0.12), tNow, 0.07);
+
+      // Filter opens up with revs and throttle
+      engineFilter.frequency.setTargetAtTime(300 + rpm * 2600 + gear * 150 + (up ? 700 : 0), tNow, 0.05);
+
+      // Throttle cut on gear change, like a sequential box
+      if (gear !== engLastGear && sp > 1) {
+        engineGain.gain.cancelScheduledValues(tNow);
+        engineGain.gain.setValueAtTime(0.015, tNow);
+        engLastGear = gear;
+      }
+      const vol = (0.09 + rpm * 0.10 + (up ? 0.06 : 0)) * (SETTINGS.sfx / 100);
+      engineGain.gain.setTargetAtTime(vol, tNow, 0.08);
+
+      // Firing pulse: heavy chug at idle, fades as the revs climb
+      pulseOsc.frequency.setTargetAtTime(freq * 0.5, tNow, 0.02);
+      pulseGain.gain.setTargetAtTime(vol * 0.4 * (1 - rpm * 0.8), tNow, 0.05);
+    }
+
     // ── HUD ───────────────────────────────────────────────────────────────
     const speedKmh = car.speed * 3.6;
     updateHUD(speedKmh, elapsed, bestLap);
@@ -1400,6 +1730,12 @@ function loop() {
     camera.lookAt(car.pos.x, car.pos.y + 0.5, car.pos.z);
   }
 
+  // Fade the engine out whenever we're not racing
+  if (audioCtx && !gameActive) {
+    engineGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.15);
+    pulseGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.15);
+  }
+
   renderer.render(scene, camera);
 }
 
@@ -1407,6 +1743,7 @@ loop();
 
 // ─── Play button ──────────────────────────────────────────────────────────────
 document.getElementById('btn-play').addEventListener('click', () => {
+  initAudio();
   gameActive = true;
   document.getElementById('main-menu').style.display = 'none';
   document.getElementById('hud').style.display = 'flex';
@@ -1418,6 +1755,7 @@ document.getElementById('btn-play').addEventListener('click', () => {
 
 // ─── Garage button ────────────────────────────────────────────────────────────
 document.getElementById('btn-garage').addEventListener('click', () => {
+  initAudio();
   garageOpen = true;
   document.getElementById('main-menu').style.display = 'none';
   document.getElementById('garage-menu').style.display = 'block';
@@ -1429,6 +1767,18 @@ document.getElementById('btn-garage-back').addEventListener('click', () => {
   document.getElementById('main-menu').style.display = 'flex';
   camera.position.set(-10, 10, 22);
   camera.lookAt(20, 0, -40);
+});
+
+// ─── Settings button ──────────────────────────────────────────────────────────
+document.getElementById('btn-settings').addEventListener('click', () => {
+  initAudio();
+  document.getElementById('main-menu').style.display = 'none';
+  document.getElementById('settings-menu').style.display = 'block';
+});
+
+document.getElementById('btn-settings-back').addEventListener('click', () => {
+  document.getElementById('settings-menu').style.display = 'none';
+  document.getElementById('main-menu').style.display = 'flex';
 });
 </script>
 </body>
